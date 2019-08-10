@@ -4,7 +4,7 @@
         "input_size":           416,
         "anchors":              [0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828], 
         "max_box_per_image":    10,        
-        "labels":               []  # if empty detect all labels in COCO
+        "labels":               []
     },
 
     "train": {
@@ -28,9 +28,15 @@
     },
 
     "valid": {
-        "valid_image_folder":   "", # if empty the train portion will be split into train and validation portion  
+        "valid_image_folder":   "",
         "valid_annot_folder":   "",
-
         "valid_times":          1
+    },
+
+    "test": {
+        "test_image_folder":   "/data/datasets/COCO/val2014/",
+        "test_annot_folder":   "/data/datasets/COCO/val2014_annotations/",
+        "test_times":          1
     }
 }
+
