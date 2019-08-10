@@ -4,53 +4,50 @@ import cv2
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm import tqdm
+
+class BoundBox:
+    def __init__(self, xmin, xmax, ymin, ymax, obj_type):
+        self.xmin = xmin
+        self.ymin = ymin
+        self.xmax = xmax
+        self.ymax = ymax
+        self.obj_type = obj_type 
+
 
 def parse_annotation(ann_dir, img_dir, labels=[]):
-    '''
-    output:
-    - Each image is a dictionary containing the annoation infomation of an image.
-    - seen_train_labels is the dictionary containing
-            (key, value) = (the object class, the number of objects found in the images)
-    '''
     all_imgs = []
     seen_labels = {}
     
-    for ann in sorted(os.listdir(ann_dir))[:100]:
-        
-        if "xml" not in ann or 'train' not in ann:
-            continue
-
+    for ann in tqdm(sorted(os.listdir(ann_dir))):
         img = {'object':[]}
 
         tree = ET.parse(ann_dir + ann)
         
         for elem in tree.iter():
             if 'filename' in elem.tag:
-                path_to_image = img_dir + elem.text
-                img['filename'] = path_to_image
-                if not os.path.exists(path_to_image):
-                    assert False, "file does not exist!\n{}".format(path_to_image)
+                img['filename'] = img_dir + elem.text
             if 'width' in elem.tag:
                 img['width'] = int(elem.text)
             if 'height' in elem.tag:
                 img['height'] = int(elem.text)
             if 'object' in elem.tag or 'part' in elem.tag:
-                obj = {}        
+                obj = {}
+                
                 for attr in list(elem):
                     if 'name' in attr.tag:
-                        
                         obj['name'] = attr.text
+
+                        if obj['name'] in seen_labels:
+                            seen_labels[obj['name']] += 1
+                        else:
+                            seen_labels[obj['name']] = 1
                         
                         if len(labels) > 0 and obj['name'] not in labels:
                             break
                         else:
                             img['object'] += [obj]
                             
-                        if obj['name'] in seen_labels:
-                            seen_labels[obj['name']] += 1
-                        else:
-                            seen_labels[obj['name']]  = 1
-                                                    
                     if 'bndbox' in attr.tag:
                         for dim in list(attr):
                             if 'xmin' in dim.tag:
@@ -87,7 +84,7 @@ def draw_boxes(image, xmin, xmax, ymin, ymax, label):
     cv2.putText(image, label, 
                (xmin, ymin+20), 
                cv2.FONT_HERSHEY_SIMPLEX, 
-               2e-3 * image_h, 
+               1e-3 * image_h, 
                (a,b,c), 2)
     return image    
                    
@@ -101,12 +98,15 @@ def plot_image_anchors(index):
         image = draw_boxes(image, x_min, x_max, y_min, y_max, obj['name'])
     plt.imshow(image)
     plt.show()
- 
-##annotations
-train_annot_folder = '/data/datasets/COCO/new_annotations/'
-train_image_folder = '/data/datasets/COCO/train2014/' 
-train_image, seen_train_labels = parse_annotation(train_annot_folder, train_image_folder)
-print("N train = {}".format(len(train_image)))
-for i in range(50, 53):
-    plot_image_anchors(i)
+
+
+if __name__ == '__main__': 
+    ##annotations
+    train_annot_folder = '/data/datasets/COCO/new_annotations/'
+    train_image_folder = '/data/datasets/COCO/train2014/' 
+    train_image = parse_annotation(train_annot_folder, train_image_folder)
+    print("N train = {}".format(len(train_image)))
+    print(train_image[0])
+    for i in range(60, 61):
+        plot_image_anchors(0)
 
