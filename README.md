@@ -21,13 +21,33 @@ unzip train2014.zip
 unzip val2014.zip
 unzip annotations_trainval2014.zip 
 ```
-convert COCO annotation format to Pascal VOC format, run: 
+create two subfolders in the COCO/ folder to store Pascal VOC format annotations:
 ```
 mkdir train2014_annotations/ 
-python coco2pascal.py create_annotations COCO/ train COCO/train2014_annotations/ 
 mkdir val2014_annotations/
+```
+git clone this repo to your computer and use the coco2pascal.py script to convert COCO annotation format to Pascal VOC format 
+```
+git clone https://github.com/shangranq/Yolov2-Pytorch.git
+cd Yolov2_Pytorch/
+python coco2pascal.py create_annotations COCO/ train COCO/train2014_annotations/ 
 python coco2pascal.py create_annotations COCO/ val COCO/val2014_annotations/  
 ```
+
+So far the dataset has been prepared and the data folder structure should be the same as:
+```
+.
+    ├── COCO
+          ├──train2014                    # training set images
+          ├──val2014                      # validation set images
+          ├──train2014_annotations        # Pascal VOC format training set annotation
+          ├──val2014_annotations          # Pascal VOC format validation set annotation 
+          ├──annotations                  # original COCO annotation 
+    
+``` 
+
+
+
 
 
 
