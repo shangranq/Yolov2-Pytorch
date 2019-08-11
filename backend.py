@@ -18,6 +18,12 @@ class Yolo_v2(nn.Module):
         x = x.view(-1, self.nb_box, (4 + 1 + self.nb_class), 13, 13)
         return x
 
+    def normalize(self, image):
+        image = image / 255.
+        image = image - 0.5
+        image = image * 2.
+        return image
+
 if __name__ == "__main__":
     Yolo = Yolo_v2(5, 80, "MobileNet")            
     test_input = torch.Tensor(1, 3, 416, 416)

@@ -26,14 +26,16 @@ def _main_(args):
     #   Parse the annotations 
     ###############################
 
-    # parse annotations of the training set
-    # train_imgs is a list of dictionary with the following keys and contents: 
-    #     object   : a list of objects in the image, each object is a dictionary with object name, box coordinates (xmin, xmax, ymin, ymax)
-    #     filename : complete path of the image  
-    #     width    : original pixel width
-    #     height   : original pixel height
-    # train_labels contains the statistics of the count of each type of object 
-    
+    """
+    parse annotations of the training set
+    train_imgs is a list of dictionary with the following keys and contents: 
+        object   : a list of objects in the image, each object is a dictionary with object name, box coordinates (xmin, xmax, ymin, ymax)
+        filename : complete path of the image  
+        width    : original pixel width
+        height   : original pixel height
+    train_labels contains the statistics of the count of each type of object 
+    """
+
     train_imgs, train_labels = parse_annotation(config['train']['train_annot_folder'], 
                                                 config['train']['train_image_folder'], 
                                                 config['model']['labels'])
@@ -72,11 +74,30 @@ def _main_(args):
     #   Construct the model 
     ###############################
 
-    yolo = YOLO(backend             = config['model']['backend'],
+    yolo = YOLO(feature_extractor   = config['model']['backend'],
                 input_size          = config['model']['input_size'], 
                 labels              = config['model']['labels'], 
                 max_box_per_image   = config['model']['max_box_per_image'],
                 anchors             = config['model']['anchors']) 
+
+    ###############################
+    #   Start the training process 
+    ###############################
+
+    yolo.train(train_imgs         = train_imgs,
+               valid_imgs         = valid_imgs,
+               train_times        = config['train']['train_times'],
+               valid_times        = config['valid']['valid_times'],
+               nb_epochs          = config['train']['nb_epochs'], 
+               learning_rate      = config['train']['learning_rate'], 
+               batch_size         = config['train']['batch_size'],
+               warmup_epochs      = config['train']['warmup_epochs'],
+               object_scale       = config['train']['object_scale'],
+               no_object_scale    = config['train']['no_object_scale'],
+               coord_scale        = config['train']['coord_scale'],
+               class_scale        = config['train']['class_scale'],
+               saved_weights_name = config['train']['saved_weights_name'],
+               debug              = config['train']['debug'])
 
 
 
