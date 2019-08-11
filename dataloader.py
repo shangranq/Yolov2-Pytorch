@@ -4,12 +4,12 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from random import shuffle
-import opencv as cv2
+import cv2
 import copy
 
 class ImageReader(object):
     def __init__(self,IMAGE_H,IMAGE_W, norm=None):
-        # IMAGE_H and IMAGE_W are standard sizes of input
+        # IMAGE_H and IMAGE_W is the standard size of input from the config file
         self.IMAGE_H = IMAGE_H
         self.IMAGE_W = IMAGE_W
         self.norm    = norm
@@ -20,6 +20,7 @@ class ImageReader(object):
             image = image[:,:,::-1]
         if self.norm is not None:
             image = self.norm(image)
+        image = np.transpose(image, (2, 0, 1)) # pytorch is channel first 
         return image
     
     def fit(self, train_instance):
@@ -144,10 +145,7 @@ class BoundBox:
     def __init__(self, xmin, ymin, xmax, ymax, confidence=None,classes=None):
         self.xmin, self.ymin = xmin, ymin
         self.xmax, self.ymax = xmax, ymax
-        ## the code below are used during inference
-        # probability
-        self.confidence      = confidence
-        # class probaiblities [c1, c2, .. cNclass]
+        self.confidence = confidence
         self.set_class(classes)
         
     def set_class(self,classes):
@@ -163,14 +161,59 @@ class BoundBox:
 
 class data_generator(Dataset):
 
-    def __init__(self, Data_dir, dset_name, stage):
-        
+    def __init__(self, imgs, config, norm):
+        self.imgs = imgs
+        self.config = config
+        self.norm = norm
+        self.bestAnchorBoxFinder = BestAnchorBoxFinder(config['ANCHORS'])
+        self.imageReader = ImageReader(config['IMAGE_H'],config['IMAGE_W'],norm=norm) 
 
     def __len__(self):
-        return len(self.index_list)
+        return len(self.imgs)
 
     def __getitem__(self, idx):
-        return [x_batch, b_batch], y_batch
+        """
+        for a single image: 
+            x_batch (3, 416, 416)
+            b_batch (true_box_buffer, 4)
+            y_batch (5+nb_class, 13, 13)
+        """
+        x_batch = np.zeros((3, self.config['IMAGE_H'], self.config['IMAGE_W']))                      
+        b_batch = np.zeros((1, 1, 1, self.config['TRUE_BOX_BUFFER'], 4))  
+        y_batch = np.zeros((self.config['BOX'], 4+1+len(self.config['LABELS']), self.config['GRID_H'], self.config['GRID_W']))     
+
+        img = self.imgs[idx]
+        img, all_objs = self.imageReader.fit(img)
+        true_box_index = 0
+
+        for obj in all_objs:
+
+            if obj['xmax'] > obj['xmin'] and obj['ymax'] > obj['ymin'] and obj['name'] in self.config['LABELS']:
+                center_x, center_y = rescale_centerxy(obj,self.config)
+                grid_x = int(np.floor(center_x))
+                grid_y = int(np.floor(center_y))
+        
+            if grid_x < self.config['GRID_W'] and grid_y < self.config['GRID_H']:
+                obj_indx  = self.config['LABELS'].index(obj['name'])
+                center_w, center_h = rescale_cebterwh(obj,self.config)
+                box = [center_x, center_y, center_w, center_h]
+                best_anchor,max_iou = self.bestAnchorBoxFinder.find(center_w, center_h)
+                
+                y_batch[best_anchor, 0:4, grid_y, grid_x] = box
+                y_batch[best_anchor, 4, grid_y, grid_x] = 1. 
+                y_batch[best_anchor, 5+obj_indx, grid_y, grid_x] = 1 
+                                
+                b_batch[0, 0, 0, true_box_index] = box        
+                true_box_index += 1
+                true_box_index = true_box_index % self.config['TRUE_BOX_BUFFER']
+
+        x_batch = img
+
+        return x_batch, b_batch, y_batch            
+                
+
+if __name__ == "__main__":
+    pass
 
 
 
