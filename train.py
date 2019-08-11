@@ -2,7 +2,7 @@ import argparse
 import os
 import numpy as np
 from util import parse_annotation
-#from frontend import YOLO
+from frontend import YOLO
 import json
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
@@ -33,28 +33,27 @@ def _main_(args):
     #     width    : original pixel width
     #     height   : original pixel height
     # train_labels contains the statistics of the count of each type of object 
-#    train_imgs, train_labels = parse_annotation(config['train']['train_annot_folder'], 
-#                                                config['train']['train_image_folder'], 
-#                                                config['model']['labels'])
+    
+    train_imgs, train_labels = parse_annotation(config['train']['train_annot_folder'], 
+                                                config['train']['train_image_folder'], 
+                                                config['model']['labels'])
  
     # split the training set into 80% training and 20% validation
-#    if os.path.exists(config['valid']['valid_annot_folder']):
-#        valid_imgs, valid_labels = parse_annotation(config['valid']['valid_annot_folder'], 
-#                                                    config['valid']['valid_image_folder'], 
-#                                                    config['model']['labels'])
-#    else:
-#        train_valid_split = int(0.8*len(train_imgs))
-#        np.random.shuffle(train_imgs)
-#        valid_imgs = train_imgs[train_valid_split:]
-#        train_imgs = train_imgs[:train_valid_split]
+    if os.path.exists(config['valid']['valid_annot_folder']):
+        valid_imgs, valid_labels = parse_annotation(config['valid']['valid_annot_folder'], 
+                                                    config['valid']['valid_image_folder'], 
+                                                    config['model']['labels'])
+    else:
+        train_valid_split = int(0.8*len(train_imgs))
+        np.random.shuffle(train_imgs)
+        valid_imgs = train_imgs[train_valid_split:]
+        train_imgs = train_imgs[:train_valid_split]
 
     # parse annotations of the testing set
     test_imgs, test_labels = parse_annotation(config['test']['test_annot_folder'],
                                               config['test']['test_image_folder'],
                                               config['model']['labels'])
     
-    print(len(train_imgs), len(valid_imgs), len(test_imgs))
-
     if len(config['model']['labels']) > 0:
         overlap_labels = set(config['model']['labels']).intersection(set(train_labels.keys()))
 
@@ -69,7 +68,15 @@ def _main_(args):
         print('No labels are provided. Train on all seen labels.')
         config['model']['labels'] = train_labels.keys()
 
+    ###############################
+    #   Construct the model 
+    ###############################
 
+    yolo = YOLO(backend             = config['model']['backend'],
+                input_size          = config['model']['input_size'], 
+                labels              = config['model']['labels'], 
+                max_box_per_image   = config['model']['max_box_per_image'],
+                anchors             = config['model']['anchors']) 
 
 
 
