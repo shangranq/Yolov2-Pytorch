@@ -30,70 +30,6 @@ class BoundBox:
         return self.score
     
 
-class ImageReader(object):
-    def __init__(self,IMAGE_H,IMAGE_W, norm=None):
-        # IMAGE_H and IMAGE_W is the standard size of input from the config file
-        self.IMAGE_H = IMAGE_H
-        self.IMAGE_W = IMAGE_W
-        self.norm    = norm
-        
-    def encode_core(self,image, reorder_rgb=True):     
-        image = cv2.resize(image, (self.IMAGE_H, self.IMAGE_W))
-        if reorder_rgb:
-            image = image[:,:,::-1]
-        if self.norm is not None:
-            image = self.norm(image)
-        image = np.transpose(image, (2, 0, 1)) # pytorch is channel first 
-        return image
-    
-    def fit(self, train_instance):
-        '''
-        read in and resize the image, annotations are resized accordingly.
-        
-        -- Input -- 
-        
-        train_instance : dictionary containing filename, height, width and object
-        
-        {'filename': 'ObjectDetectionRCNN/VOCdevkit/VOC2012/JPEGImages/2008_000054.jpg',
-         'height':   333,
-         'width':    500,
-         'object': [{'name': 'bird',
-                     'xmax': 318,
-                     'xmin': 284,
-                     'ymax': 184,
-                     'ymin': 100},
-                    {'name': 'bird', 
-                     'xmax': 198, 
-                     'xmin': 112, 
-                     'ymax': 209, 
-                     'ymin': 146}]
-        }
-        
-        '''
-        if not isinstance(train_instance, dict):
-            train_instance = {'filename': train_instance}
-                
-        image_name = train_instance['filename']
-        image = cv2.imread(image_name)
-        h, w, c = image.shape
-        if image is None: print('Cannot find ', image_name)
-        # resize the image to standard size
-        image = self.encode_core(image, reorder_rgb=True)
-        if "object" in train_instance.keys():
-            all_objs = copy.deepcopy(train_instance['object'])     
-            # rescale the xmin, xmax, ymin, ymax of all objects accordingly 
-            for obj in all_objs:
-                for attr in ['xmin', 'xmax']:
-                    obj[attr] = int(obj[attr] * float(self.IMAGE_W) / w)
-                    obj[attr] = max(min(obj[attr], self.IMAGE_W), 0)
-                for attr in ['ymin', 'ymax']:
-                    obj[attr] = int(obj[attr] * float(self.IMAGE_H) / h)
-                    obj[attr] = max(min(obj[attr], self.IMAGE_H), 0)
-        else:
-            return image
-        return image, all_objs
-
-
 class BestAnchorBoxFinder(object):
     def __init__(self, ANCHORS):
         '''
@@ -133,13 +69,13 @@ class BestAnchorBoxFinder(object):
         # find the anchor that has highest IOU with this ground truth box
         best_anchor = -1
         max_iou     = -1
-        shifted_box = BoundBox(0, 0,center_w, center_h)
+        shifted_box = BoundBox(0, 0, center_w, center_h)
         for i in range(len(self.anchors)):
             anchor = self.anchors[i]
             iou    = self.bbox_iou(shifted_box, anchor)
             if max_iou < iou:
                 best_anchor = i
-                max_iou     = iou
+                max_iou = iou
         return best_anchor, max_iou
     
     
@@ -153,6 +89,7 @@ def rescale_centerxy(obj, config):
     center_y = .5*(obj['ymin'] + obj['ymax'])
     center_y = center_y / (float(config['IMAGE_H']) / config['GRID_H'])
     return center_x, center_y
+
 
 def rescale_cebterwh(obj, config):
     '''
@@ -288,9 +225,8 @@ class data_generator(Dataset):
         
         img, all_objs = self.aug_image(img, jitter=self.jitter)
         
-        
         true_box_index = 0
-
+        
         for obj in all_objs:
 
             if obj['xmax'] > obj['xmin'] and obj['ymax'] > obj['ymin'] and obj['name'] in self.config['LABELS']:
@@ -312,10 +248,8 @@ class data_generator(Dataset):
                 true_box_index += 1
                 true_box_index = true_box_index % self.config['TRUE_BOX_BUFFER']
                 
-        if self.norm != None: 
-            x_batch = self.norm(img)
-        else:
-            x_batch = img
+        img = self.norm(img) if self.norm != None else img
+        x_batch = np.transpose(img, (2, 0, 1))  # channel last to channel first
 
         return x_batch, b_batch, y_batch            
                 
