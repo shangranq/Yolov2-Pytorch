@@ -7,6 +7,29 @@ from random import shuffle
 import cv2
 import copy
 
+
+class BoundBox:
+    def __init__(self, xmin, ymin, xmax, ymax, c = None, classes = None):
+        self.xmin = xmin
+        self.ymin = ymin
+        self.xmax = xmax
+        self.ymax = ymax
+        self.c     = c
+        self.classes = classes
+        self.label = -1
+        self.score = -1
+
+    def get_label(self):
+        if self.label == -1:
+            self.label = np.argmax(self.classes)
+        return self.label
+    
+    def get_score(self):
+        if self.score == -1:
+            self.score = self.classes[self.get_label()]
+        return self.score
+    
+
 class ImageReader(object):
     def __init__(self,IMAGE_H,IMAGE_W, norm=None):
         # IMAGE_H and IMAGE_W is the standard size of input from the config file
@@ -141,35 +164,114 @@ def rescale_cebterwh(obj, config):
     return center_w, center_h
 
 
-class BoundBox:
-    def __init__(self, xmin, ymin, xmax, ymax, confidence=None,classes=None):
-        self.xmin, self.ymin = xmin, ymin
-        self.xmax, self.ymax = xmax, ymax
-        self.confidence = confidence
-        self.set_class(classes)
-        
-    def set_class(self,classes):
-        self.classes = classes
-        self.label   = np.argmax(self.classes) 
-        
-    def get_label(self):  
-        return(self.label)
-    
-    def get_score(self):
-        return(self.classes[self.label])
-
-
 class data_generator(Dataset):
-
-    def __init__(self, imgs, config, norm):
-        self.imgs = imgs
+    def __init__(self, images, config, jitter=True, norm=None):
+        self.images = images
         self.config = config
         self.norm = norm
+        self.jitter = jitter
+        self.anchors = [BoundBox(0, 0, config['ANCHORS'][2*i], config['ANCHORS'][2*i+1]) for i in range(int(len(config['ANCHORS'])//2))]
         self.bestAnchorBoxFinder = BestAnchorBoxFinder(config['ANCHORS'])
-        self.imageReader = ImageReader(config['IMAGE_H'],config['IMAGE_W'],norm=norm) 
+        
+        ### augmentors by https://github.com/aleju/imgaug
+        sometimes = lambda aug: iaa.Sometimes(0.5, aug)
+        self.aug_pipe = iaa.Sequential(
+            [
+                # execute 0 to 5 of the following (less important) augmenters per image
+                # don't execute all of them, as that would often be way too strong
+                iaa.SomeOf((0, 5),
+                    [
+                        iaa.OneOf([
+                            iaa.GaussianBlur((0, 3.0)), # blur images with a sigma between 0 and 3.0
+                            iaa.AverageBlur(k=(2, 7)), # blur image using local means with kernel sizes between 2 and 7
+                            iaa.MedianBlur(k=(3, 11)), # blur image using local medians with kernel sizes between 2 and 7
+                        ]),
+                        iaa.Sharpen(alpha=(0, 1.0), lightness=(0.75, 1.5)), # sharpen images
+                        iaa.AdditiveGaussianNoise(loc=0, scale=(0.0, 0.05*255), per_channel=0.5), # add gaussian noise to images
+                        iaa.OneOf([
+                            iaa.Dropout((0.01, 0.1), per_channel=0.5), # randomly remove up to 10% of the pixels
+                        ]), 
+                        iaa.Add((-10, 10), per_channel=0.5), # change brightness of images (by -10 to 10 of original value)
+                        iaa.Multiply((0.5, 1.5), per_channel=0.5), # change brightness of images (50-150% of original value)
+                        iaa.ContrastNormalization((0.5, 2.0), per_channel=0.5), # improve or worsen the contrast
+                    ],
+                    random_order=True
+                )
+            ],
+            random_order=True
+        )
+        
 
     def __len__(self):
-        return len(self.imgs)
+        return len(self.images)
+    
+    def num_classes(self):
+        return len(self.config['LABELS'])
+    
+    def load_annotation(self, i):
+        annots = []
+        for obj in self.images[i]['object']:
+            annot = [obj['xmin'], obj['ymin'], obj['xmax'], obj['ymax'], self.config['LABELS'].index(obj['name'])]
+            annots += [annot]
+        if len(annots) == 0: annots = [[]]
+        return np.array(annots)
+    
+    def load_image(self, i):
+        return cv2.imread(self.images[i]['filename'])
+
+    def aug_image(self, train_instance, jitter):
+        image_name = train_instance['filename']
+        image = cv2.imread(image_name)
+        
+        if image is None: print('Cannot find ', image_name)
+
+        h, w, c = image.shape
+        all_objs = copy.deepcopy(train_instance['object'])
+
+        if jitter:
+            ### scale the image
+            scale = np.random.uniform() / 10. + 1.
+            image = cv2.resize(image, (0,0), fx = scale, fy = scale)
+
+            ### translate the image
+            max_offx = (scale-1.) * w
+            max_offy = (scale-1.) * h
+            offx = int(np.random.uniform() * max_offx)
+            offy = int(np.random.uniform() * max_offy)
+            
+            image = image[offy : (offy + h), offx : (offx + w)]
+
+            ### flip the image
+            flip = np.random.binomial(1, .5)
+            if flip > 0.5: image = cv2.flip(image, 1)
+            
+            ### change brightness, sharpness, blurness, dropout and so on .. pixel value augmentation 
+            image = self.aug_pipe.augment_image(image)            
+            
+        # resize the image to standard size
+        image = cv2.resize(image, (self.config['IMAGE_H'], self.config['IMAGE_W']))
+        image = image[:,:,::-1]  # BGR to RGB
+
+        # fix object's position and size
+        for obj in all_objs:
+            for attr in ['xmin', 'xmax']:
+                if jitter: obj[attr] = int(obj[attr] * scale - offx)
+                    
+                obj[attr] = int(obj[attr] * float(self.config['IMAGE_W']) / w)
+                obj[attr] = max(min(obj[attr], self.config['IMAGE_W']), 0)
+                
+            for attr in ['ymin', 'ymax']:
+                if jitter: obj[attr] = int(obj[attr] * scale - offy)
+                    
+                obj[attr] = int(obj[attr] * float(self.config['IMAGE_H']) / h)
+                obj[attr] = max(min(obj[attr], self.config['IMAGE_H']), 0)
+
+            if jitter and flip > 0.5:
+                xmin = obj['xmin']
+                obj['xmin'] = self.config['IMAGE_W'] - obj['xmax']
+                obj['xmax'] = self.config['IMAGE_W'] - xmin
+                
+        return image, all_objs
 
     def __getitem__(self, idx):
         """
@@ -182,22 +284,25 @@ class data_generator(Dataset):
         b_batch = np.zeros((1, 1, 1, self.config['TRUE_BOX_BUFFER'], 4))  
         y_batch = np.zeros((self.config['BOX'], 4+1+len(self.config['LABELS']), self.config['GRID_H'], self.config['GRID_W']))     
 
-        img = self.imgs[idx]
-        img, all_objs = self.imageReader.fit(img)
+        img = self.images[idx]
+        
+        img, all_objs = self.aug_image(img, jitter=self.jitter)
+        
+        
         true_box_index = 0
 
         for obj in all_objs:
 
             if obj['xmax'] > obj['xmin'] and obj['ymax'] > obj['ymin'] and obj['name'] in self.config['LABELS']:
-                center_x, center_y = rescale_centerxy(obj,self.config)
+                center_x, center_y = rescale_centerxy(obj, self.config)
                 grid_x = int(np.floor(center_x))
                 grid_y = int(np.floor(center_y))
         
             if grid_x < self.config['GRID_W'] and grid_y < self.config['GRID_H']:
                 obj_indx  = self.config['LABELS'].index(obj['name'])
-                center_w, center_h = rescale_cebterwh(obj,self.config)
+                center_w, center_h = rescale_cebterwh(obj, self.config)
                 box = [center_x, center_y, center_w, center_h]
-                best_anchor,max_iou = self.bestAnchorBoxFinder.find(center_w, center_h)
+                best_anchor, max_iou = self.bestAnchorBoxFinder.find(center_w, center_h)
                 
                 y_batch[best_anchor, 0:4, grid_y, grid_x] = box
                 y_batch[best_anchor, 4, grid_y, grid_x] = 1. 
@@ -206,8 +311,11 @@ class data_generator(Dataset):
                 b_batch[0, 0, 0, true_box_index] = box        
                 true_box_index += 1
                 true_box_index = true_box_index % self.config['TRUE_BOX_BUFFER']
-
-        x_batch = img
+                
+        if self.norm != None: 
+            x_batch = self.norm(img)
+        else:
+            x_batch = img
 
         return x_batch, b_batch, y_batch            
                 
