@@ -3,7 +3,7 @@ from torch.utils.data import Dataset, DataLoader
 import os
 import cv2
 import matplotlib.pyplot as plt
-#from utils import decode_netout, compute_overlap, compute_ap
+from util import decode_netout, compute_overlap, compute_ap
 from backend import Yolo_v2
 import torch
 import torch.nn as nn
@@ -28,11 +28,13 @@ class YOLO(object):
 
         # make the Yolo model
         self.Yolo = Yolo_v2(nb_box=self.nb_box, nb_class=self.nb_class, feature_extractor=feature_extractor)
-
         
-    def custom_loss(self, y_true, y_pred):
+    def custom_loss(self, y_true, y_pred, true_points):
         return 
-
+    
+    def load_weights(self, weight_path):
+        self.model.load_state_dict(torch.load(weight_path))     
+    
     def train(self, train_imgs,     # the list of images to train the model
                     valid_imgs,     # the list of images used to validate the model
                     train_times,    # the number of time to repeat the training set, often used for small datasets
@@ -45,7 +47,7 @@ class YOLO(object):
                     no_object_scale,
                     coord_scale,
                     class_scale,
-                    saved_weights_name='best_weights.h5',
+                    saved_weights_name='yolo_weights.pth',
                     debug=False):  
 
         self.batch_size = batch_size
@@ -74,29 +76,182 @@ class YOLO(object):
             'TRUE_BOX_BUFFER' : self.max_box_per_image,
         }  
 
-        dataloader = data_generator(train_imgs, generator_config, norm=self.Yolo.normalize)
+        train_dataloader = data_generator(train_imgs, generator_config, norm=self.Yolo.normalize)
+        valid_dataloader = data_generator(valid_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
+        train_batch_generator = DataLoader(train_dataloader, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
+        valid_batch_generator = DataLoader(valid_dataloader, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
                   
-        x_batch, b_batch, y_batch = dataloader[0]
-
+        x_batch, b_batch, y_batch = train_dataloader[0]
         print(x_batch.shape, b_batch.shape, y_batch.shape)
-
         plt.imshow(x_batch[0, :, :])
         plt.show()
-
-        """
-        train_generator = DataLoader(dataloader, shuffle=True, batch_size=10)
-   
-        for x_batch, b_batch, y_batch in train_generator:
-             print(x_batch.shape, b_batch.shape, y_batch.shape)
         
-        train_generator = BatchGenerator(train_imgs, 
-                                     generator_config, 
-                                     norm=self.feature_extractor.normalize)
-        valid_generator = BatchGenerator(valid_imgs, 
-                                     generator_config, 
-                                     norm=self.feature_extractor.normalize,
-                                     jitter=False)   
-        """
+        ############################################
+        # Start the training process
+        ############################################
+        optimizer = optim.Adam(self.Yolo.parameters(), lr=learning_rate, betas=[0.9, 0.999], eps=1e-08, weight_decay=0.0)
+        
+        val_best_loss = float('inf')
+        
+        for epoch in range(nb_epochs):
+            self.train_epoch(self.Yolo, train_batch_generator, optimizer, self.custom_loss)
+            val_loss = self.val_epoch(self.Yolo, valid_batch_generator, self.custom_loss)
+            if val_loss < val_best_loss:
+                val_best_loss = val_loss
+                torch.save(self.Yolo.state_dict(), saved_weights_name)
+                
+                
+        ############################################
+        # Compute mAP on the validation set
+        ############################################
+        average_precisions = self.evaluate(valid_dataloader)     
+
+        # print evaluation
+        for label, average_precision in average_precisions.items():
+            print(self.labels[label], '{:.4f}'.format(average_precision))
+        print('mAP: {:.4f}'.format(sum(average_precisions.values()) / len(average_precisions)))     
+        
+    def train_epoch(self, model, dataloader, optimizer, criterion):
+        model.train(True)
+        for x_batch, b_batch, y_batch in dataloader:
+            x_batch, b_batch, y_batch = x_batch.cuda(), b_batch.cuda(), y_batch.cuda()
+            model.zero_grad()
+            y_batch_pred = model(x_batch)
+            loss = criterion(y_batch_pred, y_batch, b_batch)
+            loss.backward()
+            optimizer.step()
+            
+     def val_epoch(self, model, dataloader, criterion):
+        model.train(False)
+        loss = 0
+        for x_batch, b_batch, y_batch in dataloader:
+            x_batch, b_batch, y_batch = x_batch.cuda(), b_batch.cuda(), y_batch.cuda()
+            y_batch_pred = model(x_batch)
+            loss += criterion(y_batch_pred, y_batch, b_batch)
+        return loss
+    
+    def evaluate(self, 
+                 generator, 
+                 iou_threshold=0.3,
+                 score_threshold=0.3,
+                 max_detections=100,
+                 save_path=None):
+  
+        # gather all detections and annotations
+        all_detections = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
+        all_annotations = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
+
+        for i in range(len(generator)):
+            raw_image = generator.load_image(i)
+            raw_height, raw_width, raw_channels = raw_image.shape
+
+            # make the boxes and the labels
+            pred_boxes  = self.predict(image)
+
+            score = np.array([box.score for box in pred_boxes])
+            pred_labels = np.array([box.label for box in pred_boxes])        
+            
+            if len(pred_boxes) > 0:
+                pred_boxes = np.array([[box.xmin*raw_width, box.ymin*raw_height, box.xmax*raw_width, box.ymax*raw_height, box.score] for box in pred_boxes])
+            else:
+                pred_boxes = np.array([[]])  
+            
+            # sort the boxes and the labels according to scores
+            score_sort = np.argsort(-score)
+            pred_labels = pred_labels[score_sort]
+            pred_boxes  = pred_boxes[score_sort]
+            
+            # copy detections to all_detections
+            for label in range(generator.num_classes()):
+                all_detections[i][label] = pred_boxes[pred_labels == label, :]
+                
+            annotations = generator.load_annotation(i)
+            
+            # copy detections to all_annotations
+            for label in range(generator.num_classes()):
+                all_annotations[i][label] = annotations[annotations[:, 4] == label, :4].copy()
+                
+        # compute mAP by comparing all detections and all annotations
+        average_precisions = {}
+        
+        for label in range(generator.num_classes()):
+            false_positives = np.zeros((0,))
+            true_positives  = np.zeros((0,))
+            scores          = np.zeros((0,))
+            num_annotations = 0.0
+
+            for i in range(generator.size()):
+                detections           = all_detections[i][label]
+                annotations          = all_annotations[i][label]
+                num_annotations     += annotations.shape[0]
+                detected_annotations = []
+
+                for d in detections:
+                    scores = np.append(scores, d[4])
+
+                    if annotations.shape[0] == 0:
+                        false_positives = np.append(false_positives, 1)
+                        true_positives  = np.append(true_positives, 0)
+                        continue
+
+                    overlaps            = compute_overlap(np.expand_dims(d, axis=0), annotations)
+                    assigned_annotation = np.argmax(overlaps, axis=1)
+                    max_overlap         = overlaps[0, assigned_annotation]
+
+                    if max_overlap >= iou_threshold and assigned_annotation not in detected_annotations:
+                        false_positives = np.append(false_positives, 0)
+                        true_positives  = np.append(true_positives, 1)
+                        detected_annotations.append(assigned_annotation)
+                    else:
+                        false_positives = np.append(false_positives, 1)
+                        true_positives  = np.append(true_positives, 0)
+
+            # no annotations -> AP for this class is 0 (is this correct?)
+            if num_annotations == 0:
+                average_precisions[label] = 0
+                continue
+
+            # sort by score
+            indices         = np.argsort(-scores)
+            false_positives = false_positives[indices]
+            true_positives  = true_positives[indices]
+
+            # compute false positives and true positives
+            false_positives = np.cumsum(false_positives)
+            true_positives  = np.cumsum(true_positives)
+
+            # compute recall and precision
+            recall    = true_positives / num_annotations
+            precision = true_positives / np.maximum(true_positives + false_positives, np.finfo(np.float64).eps)
+
+            # compute average precision
+            average_precision  = compute_ap(recall, precision)  
+            average_precisions[label] = average_precision
+
+        return average_precisions    
+
+    def predict(self, image):
+        image_h, image_w, _ = image.shape
+        image = cv2.resize(image, (self.input_size, self.input_size))
+        image = self.Yolo.normalize(image)
+
+        input_image = image[:,:,::-1].transpose(2, 0, 1)
+        input_image = np.expand_dims(input_image, 0)
+
+        netout = self.Yolo(input_image)
+        boxes  = decode_netout(netout, self.anchors, self.nb_class)
+
+        return boxes
+    
+            
+            
+     
+            
+     
+        
+        
+
+        
     
         
         
