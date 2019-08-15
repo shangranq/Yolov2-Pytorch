@@ -68,6 +68,7 @@ def _main_(args):
             return
     else:
         print('No labels are provided. Train on all seen labels.')
+        print(train_labels.keys())
         config['model']['labels'] = train_labels.keys()
 
     ###############################

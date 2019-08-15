@@ -1,11 +1,12 @@
 import numpy as np
+import torch
 from torch.utils.data import Dataset, DataLoader
+import torch.optim as optim
 import os
 import cv2
 import matplotlib.pyplot as plt
 from util import decode_netout, compute_overlap, compute_ap
 from backend import Yolo_v2
-import torch
 import torch.nn as nn
 from dataloader import data_generator
 
@@ -28,8 +29,103 @@ class YOLO(object):
 
         # make the Yolo model
         self.Yolo = Yolo_v2(nb_box=self.nb_box, nb_class=self.nb_class, feature_extractor=feature_extractor)
+        self.Yolo = self.Yolo.cuda()        
+
+    def custom_loss(self, y_true, y_pred, true_boxes):
+        print(y_true.shape, y_pred.shape, true_boxes.shape)
+        y_true = y_true.permute(0, 3, 4, 1, 2)
+        y_pred = y_pred.permute(0, 3, 4, 1, 2)
+        print(y_true.shape, y_pred.shape, true_boxes.shape)
         
-    def custom_loss(self, y_true, y_pred, true_points):
+        cell_x = np.reshape(np.tile(np.arange(self.grid_w), [self.grid_h]), (1, self.grid_h, self.grid_w, 1, 1))
+        cell_y = np.transpose(cell_x, (0,2,1,3,4))
+        cell_grid = torch.from_numpy(np.tile(np.concatenate([cell_x,cell_y], -1), [self.batch_size, 1, 1, self.nb_box, 1]))
+        print(cell_grid.shape)
+        print(cell_grid[0, 4, 6, 0, :])
+
+        """
+        Adjust prediction
+        """
+        ### adjust x and y         
+        pred_box_xy = torch.sigmoid(y_pred[..., :2]) + cell_grid.cuda().float()
+
+        ### adjust w and h
+        pred_box_wh = torch.exp(y_pred[..., 2:4]) * torch.from_numpy(np.reshape(self.anchors, [1,1,1,self.nb_box,2])).cuda().float()
+
+        ### adjust confidence
+        pred_box_conf = torch.sigmoid(y_pred[..., 4])
+        
+        ### adjust class probabilities
+        pred_box_class = y_pred[..., 5:]
+
+        """
+        Adjust ground truth
+        """
+        ### adjust x and y
+        true_box_xy = y_true[..., 0:2] # relative position to the containing cell
+        
+        ### adjust w and h
+        true_box_wh = y_true[..., 2:4] # number of cells accross, horizontally and vertically
+        
+        ### adjust confidence
+        true_wh_half = true_box_wh / 2.
+        true_mins    = true_box_xy - true_wh_half
+        true_maxes   = true_box_xy + true_wh_half
+        
+        pred_wh_half = pred_box_wh / 2.
+        pred_mins    = pred_box_xy - pred_wh_half
+        pred_maxes   = pred_box_xy + pred_wh_half       
+        
+        intersect_mins  = torch.max(pred_mins,  true_mins)
+        intersect_maxes = torch.min(pred_maxes, true_maxes)
+        intersect_wh    = torch.max(intersect_maxes - intersect_mins, torch.zeros(intersect_maxes.size()).cuda())
+        intersect_areas = intersect_wh[..., 0] * intersect_wh[..., 1]
+        
+        true_areas = true_box_wh[..., 0] * true_box_wh[..., 1]
+        pred_areas = pred_box_wh[..., 0] * pred_box_wh[..., 1]
+
+        union_areas = pred_areas + true_areas - intersect_areas
+        iou_scores  = torch.div(intersect_areas, union_areas)
+        
+        true_box_conf = iou_scores * y_true[..., 4]
+        
+        ### adjust class probabilities
+        _, true_box_class = torch.max(y_true[..., 5:], -1)
+
+        """
+        Determine the masks
+        """
+        ### coordinate mask: simply the position of the ground truth boxes (the predictors)
+        coord_mask = y_true[..., 4].unsqueeze(-1) * self.coord_scale 
+
+        ### confidence mask: penelize predictors + penalize boxes with low IOU
+        # penalize the confidence of the boxes, which have IOU with some ground truth box < 0.6
+        true_xy = true_boxes[..., 0:2]
+        true_wh = true_boxes[..., 2:4]
+        
+        true_wh_half = true_wh / 2.
+        true_mins    = true_xy - true_wh_half
+        true_maxes   = true_xy + true_wh_half
+
+        print(pred_box_xy.shape)
+        
+        pred_xy = pred_box_xy.view(self.batch_size, self.grid_h, self.grid_w, 1, self.nb_box, 2)
+        pred_wh = pred_box_wh.view(self.batch_size, self.grid_h, self.grid_w, 1, self.nb_box, 2)
+        
+        pred_wh_half = pred_wh / 2.
+        pred_mins    = pred_xy - pred_wh_half
+        pred_maxes   = pred_xy + pred_wh_half       
+
+        print(pred_mins.shape,  true_mins.shape)
+
+        intersect_mins  = torch.max(pred_mins,  true_mins)
+        intersect_maxes = torch.max(pred_maxes, true_maxes)
+        intersect_wh    = torch.max(intersect_maxes - intersect_mins, torch.zeros(intersect_maxes.size()).cuda())
+        intersect_areas = intersect_wh[..., 0] * intersect_wh[..., 1]
+        
+        true_areas = true_wh[..., 0] * true_wh[..., 1]
+        pred_areas = pred_wh[..., 0] * pred_wh[..., 1]
+
         return 
     
     def load_weights(self, weight_path):
@@ -80,12 +176,16 @@ class YOLO(object):
         valid_dataloader = data_generator(valid_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
         train_batch_generator = DataLoader(train_dataloader, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
         valid_batch_generator = DataLoader(valid_dataloader, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
-                  
+              
+        """    
         x_batch, b_batch, y_batch = train_dataloader[0]
         print(x_batch.shape, b_batch.shape, y_batch.shape)
-        plt.imshow(x_batch[0, :, :])
+        plt.imshow(x_batch.transpose(1,2,0))
         plt.show()
-        
+        plt.imshow(train_dataloader.load_image(0)[:, :, ::-1])
+        plt.show()
+        """        
+
         ############################################
         # Start the training process
         ############################################
@@ -114,14 +214,16 @@ class YOLO(object):
     def train_epoch(self, model, dataloader, optimizer, criterion):
         model.train(True)
         for x_batch, b_batch, y_batch in dataloader:
-            x_batch, b_batch, y_batch = x_batch.cuda(), b_batch.cuda(), y_batch.cuda()
+            x_batch, b_batch, y_batch = x_batch.cuda().float(), b_batch.cuda().float(), y_batch.cuda().float()
+            print(x_batch.shape)
             model.zero_grad()
             y_batch_pred = model(x_batch)
+            print(y_batch.shape)
             loss = criterion(y_batch_pred, y_batch, b_batch)
             loss.backward()
             optimizer.step()
             
-     def val_epoch(self, model, dataloader, criterion):
+    def val_epoch(self, model, dataloader, criterion):
         model.train(False)
         loss = 0
         for x_batch, b_batch, y_batch in dataloader:
