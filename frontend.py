@@ -32,27 +32,42 @@ class YOLO(object):
         self.Yolo = self.Yolo.cuda()        
 
     def custom_loss(self, y_true, y_pred, true_boxes):
-        print(y_true.shape, y_pred.shape, true_boxes.shape)
+        
+        # y_true and y_pred shape (batch, box, 5+nb_class, grid_h, grid_w)
+        # true_boxes shape (batch, 1, 1, 1, max_boxes_per_image, 4)
+        # print(y_true.shape, y_pred.shape, true_boxes.shape)
+        # swap axies from channel first to channel last
         y_true = y_true.permute(0, 3, 4, 1, 2)
         y_pred = y_pred.permute(0, 3, 4, 1, 2)
-        print(y_true.shape, y_pred.shape, true_boxes.shape)
+        # print(y_true.shape, y_pred.shape, true_boxes.shape)
+        # y_true and y_pred shape (batch, grid_h, grid_w, box, 5+nb_class)
+        # true_boxes shape (batch, 1, 1, 1, max_boxes_per_image, 4)
         
+        # cell_x shape (1, grid_h, grid_w, 1, 1) where cell_x[0, a, b, 0, 0] = b
+        # cell_y shape (1, grid_h, grid_w, 1, 1) where cell_y[0, a, b, 0, 0] = a
         cell_x = np.reshape(np.tile(np.arange(self.grid_w), [self.grid_h]), (1, self.grid_h, self.grid_w, 1, 1))
         cell_y = np.transpose(cell_x, (0,2,1,3,4))
+        # cell_grid shape (batch, grid_h, grid_w, nb_box, 2)
         cell_grid = torch.from_numpy(np.tile(np.concatenate([cell_x,cell_y], -1), [self.batch_size, 1, 1, self.nb_box, 1]))
-        print(cell_grid.shape)
-        print(cell_grid[0, 4, 6, 0, :])
+        # print(cell_grid.shape)
+        # print(cell_grid[0, 4, 6, 0, :]==[6, 4])
 
         """
         Adjust prediction
         """
-        ### adjust x and y         
+        ### adjust x and y 
+        # pred_box_xy shape (batch, grid_h, grid_w, box, 2)
+        # sigmoid(y_pred_xy) returns the predicted location relative to the cell (one assumption is the cell length is 1)
+        # adding cell_grid makes it the location relative to the whole image
         pred_box_xy = torch.sigmoid(y_pred[..., :2]) + cell_grid.cuda().float()
 
         ### adjust w and h
+        # predicted bounding box height = anchor_box_h * exp(y_pred_h) 
+        # predicted bounding box width = anchor_box_w * exp(y_pred_w)
         pred_box_wh = torch.exp(y_pred[..., 2:4]) * torch.from_numpy(np.reshape(self.anchors, [1,1,1,self.nb_box,2])).cuda().float()
 
         ### adjust confidence
+        # confidence ranges from 0 to 1
         pred_box_conf = torch.sigmoid(y_pred[..., 4])
         
         ### adjust class probabilities
@@ -62,31 +77,35 @@ class YOLO(object):
         Adjust ground truth
         """
         ### adjust x and y
-        true_box_xy = y_true[..., 0:2] # relative position to the containing cell
+        # true_box_xy: ground truth box center xy relative to the upper left corner of the image
+        # in the grid scale, thus true_box_xy ranges from (0, grid_h) (0, grid_w)
+        true_box_xy = y_true[..., 0:2]  
         
         ### adjust w and h
-        true_box_wh = y_true[..., 2:4] # number of cells accross, horizontally and vertically
+        true_box_wh = y_true[..., 2:4] 
         
-        ### adjust confidence
+        ### adjust confidence based on IOU 
         true_wh_half = true_box_wh / 2.
         true_mins    = true_box_xy - true_wh_half
-        true_maxes   = true_box_xy + true_wh_half
+        true_maxes   = true_box_xy + true_wh_half    # shape (batch, grid_h, grid_w, box, 2)
         
         pred_wh_half = pred_box_wh / 2.
         pred_mins    = pred_box_xy - pred_wh_half
-        pred_maxes   = pred_box_xy + pred_wh_half       
+        pred_maxes   = pred_box_xy + pred_wh_half    # shape (batch, grid_h, grid_w, box, 2) 
         
         intersect_mins  = torch.max(pred_mins,  true_mins)
         intersect_maxes = torch.min(pred_maxes, true_maxes)
         intersect_wh    = torch.max(intersect_maxes - intersect_mins, torch.zeros(intersect_maxes.size()).cuda())
-        intersect_areas = intersect_wh[..., 0] * intersect_wh[..., 1]
+        intersect_areas = intersect_wh[..., 0] * intersect_wh[..., 1]   # shape (batch, grid_h, grid_w, box, 1)
         
         true_areas = true_box_wh[..., 0] * true_box_wh[..., 1]
         pred_areas = pred_box_wh[..., 0] * pred_box_wh[..., 1]
 
-        union_areas = pred_areas + true_areas - intersect_areas
-        iou_scores  = torch.div(intersect_areas, union_areas)
+        union_areas = pred_areas + true_areas - intersect_areas   
+        iou_scores  = torch.div(intersect_areas, union_areas)           # shape (batch, grid_h, grid_w, box, 1)
+        # the iou_scores calculated all IOU between predicted boxes and true boxes that were assigned to that cell
         
+        # y_true[..., 4] is a mask whose value is either 0 (no objects in the cell) or 1 (object in the cell)
         true_box_conf = iou_scores * y_true[..., 4]
         
         ### adjust class probabilities
@@ -96,10 +115,12 @@ class YOLO(object):
         Determine the masks
         """
         ### coordinate mask: simply the position of the ground truth boxes (the predictors)
+        # shape (batch, grid_h, grid_w, box, 1)
         coord_mask = y_true[..., 4].unsqueeze(-1) * self.coord_scale 
 
         ### confidence mask: penelize predictors + penalize boxes with low IOU
         # penalize the confidence of the boxes, which have IOU with some ground truth box < 0.6
+        # shape (batch, 1, 1, 1, max_number_of_boxes_per_image, 2)
         true_xy = true_boxes[..., 0:2]
         true_wh = true_boxes[..., 2:4]
         
@@ -107,26 +128,51 @@ class YOLO(object):
         true_mins    = true_xy - true_wh_half
         true_maxes   = true_xy + true_wh_half
 
-        print(pred_box_xy.shape)
-        
-        pred_xy = pred_box_xy.view(self.batch_size, self.grid_h, self.grid_w, 1, self.nb_box, 2)
-        pred_wh = pred_box_wh.view(self.batch_size, self.grid_h, self.grid_w, 1, self.nb_box, 2)
+        pred_xy = pred_box_xy.view(self.batch_size, self.grid_h, self.grid_w, self.nb_box, 1, 2)
+        pred_wh = pred_box_wh.view(self.batch_size, self.grid_h, self.grid_w, self.nb_box, 1, 2)
         
         pred_wh_half = pred_wh / 2.
         pred_mins    = pred_xy - pred_wh_half
         pred_maxes   = pred_xy + pred_wh_half       
 
-        print(pred_mins.shape,  true_mins.shape)
-
+        # true_mins shape (batch, 1, 1, 1, max_number_of_boxes_per_image, 2)
+        # pred_mins shape (batch, grid_h, grid_w, nb_box, 1, 2)
         intersect_mins  = torch.max(pred_mins,  true_mins)
+        # intersect_mins shape (batch, grid_h, grid_w, nb_box, max_number_of_boxes_per_image, 2)
         intersect_maxes = torch.max(pred_maxes, true_maxes)
         intersect_wh    = torch.max(intersect_maxes - intersect_mins, torch.zeros(intersect_maxes.size()).cuda())
-        intersect_areas = intersect_wh[..., 0] * intersect_wh[..., 1]
+        intersect_areas = intersect_wh[..., 0] * intersect_wh[..., 1]  
+        # intersect_areas shape (batch, grid_h, grid_w, nb_box, max_number_of_boxes_per_image)
         
         true_areas = true_wh[..., 0] * true_wh[..., 1]
         pred_areas = pred_wh[..., 0] * pred_wh[..., 1]
+        
+        union_areas = pred_areas + true_areas - intersect_areas
+        iou_scores  = torch.div(intersect_areas, union_areas)
 
-        return 
+        best_ious = torch.max(iou_scores, dim=4)
+        # best_ious shape (batch, grid_h, grid_w, nb_box)
+        conf_mask = (best_ious < 0.6).float() * (0 == y_true[..., 4]).float() * self.no_object_scale
+        
+        # penalize the confidence of the boxes, which are reponsible for corresponding ground truth box
+        conf_mask = conf_mask + y_true[..., 4] * self.object_scale
+        
+        ### class mask: simply the position of the ground truth boxes (the predictors)
+        class_mask = y_true[..., 4] * tf.gather(self.class_wt, true_box_class) * self.class_scale
+        
+        nb_coord_box = torch.sum((coord_mask > 0.0).float())
+        nb_conf_box  = torch.sum((conf_mask  > 0.0).float())
+        nb_class_box = torch.sum((class_mask > 0.0).float())
+        
+        loss_xy    = torch.sum((true_box_xy-pred_box_xy)**2     * coord_mask) / (nb_coord_box + 1e-6) / 2.
+        loss_wh    = torch.sum((true_box_wh-pred_box_wh)**2     * coord_mask) / (nb_coord_box + 1e-6) / 2.
+        loss_conf  = torch.sum((true_box_conf-pred_box_conf)**2 * conf_mask)  / (nb_conf_box  + 1e-6) / 2.
+        loss_class = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=true_box_class, logits=pred_box_class)
+        loss_class = tf.reduce_sum(loss_class * class_mask) / (nb_class_box + 1e-6)
+        
+        loss = loss_xy + loss_wh + loss_conf + loss_class
+     
+        return loss
     
     def load_weights(self, weight_path):
         self.model.load_state_dict(torch.load(weight_path))     
