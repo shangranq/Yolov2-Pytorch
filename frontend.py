@@ -187,7 +187,8 @@ class YOLO(object):
         self.model.load_state_dict(torch.load(weight_path))     
     
     def train(self, train_imgs,     # the list of images to train the model
-                    valid_imgs,     # the list of images used to validate the model
+                    valid_imgs,     # the list of images used to validate the model after each epoch
+                    test_imgs,      # the list of images used to test the model at the end of training 
                     train_times,    # the number of time to repeat the training set, often used for small datasets
                     valid_times,    # the number of times to repeat the validation set, often used for small datasets
                     nb_epochs,      # number of epoches
@@ -229,9 +230,11 @@ class YOLO(object):
 
         train_dataloader = data_generator(train_imgs, generator_config, norm=self.Yolo.normalize)
         valid_dataloader = data_generator(valid_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
+        test_dataloader = data_generator(test_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
         train_batch_generator = DataLoader(train_dataloader, drop_last=True, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
         valid_batch_generator = DataLoader(valid_dataloader, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
-              
+                    
+  
         """    
         x_batch, b_batch, y_batch = train_dataloader[0]
         print(x_batch.shape, b_batch.shape, y_batch.shape)
@@ -249,9 +252,12 @@ class YOLO(object):
         val_best_loss = float('inf')
         
         for epoch in range(nb_epochs):
+            print('*'*40)
             print('training the {} th epoch ...'.format(epoch))
-            #self.train_epoch(self.Yolo, train_batch_generator, optimizer, self.custom_loss)
+            self.train_epoch(self.Yolo, train_batch_generator, optimizer, self.custom_loss)
+            print('validating the model ...')
             val_loss = self.val_epoch(self.Yolo, valid_batch_generator, self.custom_loss)
+            print('validation loss is', val_loss)
             if val_loss < val_best_loss:
                 val_best_loss = val_loss
                 torch.save(self.Yolo.state_dict(), saved_weights_name)
@@ -259,8 +265,8 @@ class YOLO(object):
         ############################################
         # Compute mAP on the validation set
         ############################################
-        print('evaluating the validation set ... ')
-        average_precisions = self.evaluate(valid_dataloader)     
+        print('evaluating the testing set mAP ... ')
+        average_precisions = self.evaluate(test_dataloader)     
 
         # print evaluation
         for label, average_precision in average_precisions.items():
@@ -298,7 +304,7 @@ class YOLO(object):
         all_detections = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
         all_annotations = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
 
-        for i in range(len(generator)):
+        for i in tqdm(range(len(generator))):
             raw_image = generator.load_image(i)
             raw_height, raw_width, raw_channels = raw_image.shape
 
@@ -337,7 +343,7 @@ class YOLO(object):
             scores          = np.zeros((0,))
             num_annotations = 0.0
 
-            for i in range(generator.size()):
+            for i in range(len(generator)):
                 detections           = all_detections[i][label]
                 annotations          = all_annotations[i][label]
                 num_annotations     += annotations.shape[0]
@@ -396,7 +402,7 @@ class YOLO(object):
         input_image = torch.Tensor(np.expand_dims(input_image, 0).copy()).cuda()
 
         netout = self.Yolo(input_image)
-        boxes  = decode_netout(netout.data.numpy(), self.anchors, self.nb_class)
+        boxes  = decode_netout(netout.data.cpu().numpy(), self.anchors, self.nb_class)
 
         return boxes
     

@@ -5,7 +5,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
-
+from dataloader import BoundBox
 
 def parse_annotation(ann_dir, img_dir, labels=[]):
     all_imgs = []
