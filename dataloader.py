@@ -235,19 +235,19 @@ class data_generator(Dataset):
                 grid_x = int(np.floor(center_x))
                 grid_y = int(np.floor(center_y))
         
-            if grid_x < self.config['GRID_W'] and grid_y < self.config['GRID_H']:
-                obj_indx  = self.config['LABELS'].index(obj['name'])
-                center_w, center_h = rescale_cebterwh(obj, self.config)
-                box = [center_x, center_y, center_w, center_h]
-                best_anchor, max_iou = self.bestAnchorBoxFinder.find(center_w, center_h)
+                if grid_x < self.config['GRID_W'] and grid_y < self.config['GRID_H']:
+                    obj_indx  = self.config['LABELS'].index(obj['name'])
+                    center_w, center_h = rescale_cebterwh(obj, self.config)
+                    box = [center_x, center_y, center_w, center_h]
+                    best_anchor, max_iou = self.bestAnchorBoxFinder.find(center_w, center_h)
                 
-                y_batch[best_anchor, 0:4, grid_y, grid_x] = box
-                y_batch[best_anchor, 4, grid_y, grid_x] = 1. 
-                y_batch[best_anchor, 5+obj_indx, grid_y, grid_x] = 1 
+                    y_batch[best_anchor, 0:4, grid_y, grid_x] = box
+                    y_batch[best_anchor, 4, grid_y, grid_x] = 1. 
+                    y_batch[best_anchor, 5+obj_indx, grid_y, grid_x] = 1 
                                 
-                b_batch[0, 0, 0, true_box_index] = box        
-                true_box_index += 1
-                true_box_index = true_box_index % self.config['TRUE_BOX_BUFFER']
+                    b_batch[0, 0, 0, true_box_index] = box        
+                    true_box_index += 1
+                    true_box_index = true_box_index % self.config['TRUE_BOX_BUFFER']
                 
         img = self.norm(img) if self.norm != None else img
         x_batch = np.transpose(img, (2, 0, 1))  # channel last to channel first

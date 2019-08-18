@@ -3,12 +3,14 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 import os
+from tqdm import tqdm
 import cv2
 import matplotlib.pyplot as plt
 from util import decode_netout, compute_overlap, compute_ap
 from backend import Yolo_v2
 import torch.nn as nn
 from dataloader import data_generator
+
 
 class YOLO(object):
     def __init__(self, feature_extractor,
@@ -150,26 +152,33 @@ class YOLO(object):
         union_areas = pred_areas + true_areas - intersect_areas
         iou_scores  = torch.div(intersect_areas, union_areas)
 
-        best_ious = torch.max(iou_scores, dim=4)
+        best_ious, _ = torch.max(iou_scores, dim=4)
         # best_ious shape (batch, grid_h, grid_w, nb_box)
-        conf_mask = (best_ious < 0.6).float() * (0 == y_true[..., 4]).float() * self.no_object_scale
+        conf_mask = torch.lt(best_ious, 0.6).float() * torch.eq(y_true[..., 4], 0).float() * self.no_object_scale
         
         # penalize the confidence of the boxes, which are reponsible for corresponding ground truth box
         conf_mask = conf_mask + y_true[..., 4] * self.object_scale
         
         ### class mask: simply the position of the ground truth boxes (the predictors)
-        class_mask = y_true[..., 4] * tf.gather(self.class_wt, true_box_class) * self.class_scale
-        
-        nb_coord_box = torch.sum((coord_mask > 0.0).float())
-        nb_conf_box  = torch.sum((conf_mask  > 0.0).float())
-        nb_class_box = torch.sum((class_mask > 0.0).float())
+        # class_mask = y_true[..., 4] * tf.gather(self.class_wt, true_box_class) * self.class_scale
+        # need to figure out what is tf.gather 
+        class_mask = y_true[..., 4] * true_box_class.float() * self.class_scale      
+ 
+        nb_coord_box = torch.sum(torch.gt(coord_mask, 0.0).float())
+        nb_conf_box  = torch.sum(torch.gt(conf_mask, 0.0).float())
+        nb_class_box = torch.sum(torch.gt(class_mask, 0.0).float())
         
         loss_xy    = torch.sum((true_box_xy-pred_box_xy)**2     * coord_mask) / (nb_coord_box + 1e-6) / 2.
         loss_wh    = torch.sum((true_box_wh-pred_box_wh)**2     * coord_mask) / (nb_coord_box + 1e-6) / 2.
         loss_conf  = torch.sum((true_box_conf-pred_box_conf)**2 * conf_mask)  / (nb_conf_box  + 1e-6) / 2.
-        loss_class = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=true_box_class, logits=pred_box_class)
-        loss_class = tf.reduce_sum(loss_class * class_mask) / (nb_class_box + 1e-6)
-        
+        # loss_class = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=true_box_class, logits=pred_box_class)
+        # loss_class = tf.reduce_sum(loss_class * class_mask) / (nb_class_box + 1e-6)
+        # pred_box_class swap axes 16, 13, 13, 5, 80 into 16, 80, 13, 13, 5
+        # true_box_class 16, 13, 13, 5
+        pred_box_class = pred_box_class.permute(0, 4, 1, 2, 3)
+        loss_class = nn.CrossEntropyLoss(reduction='none')(pred_box_class, true_box_class)     
+        loss_class = (loss_class * class_mask).sum() / (nb_class_box + 1e-6)
+
         loss = loss_xy + loss_wh + loss_conf + loss_class
      
         return loss
@@ -220,8 +229,8 @@ class YOLO(object):
 
         train_dataloader = data_generator(train_imgs, generator_config, norm=self.Yolo.normalize)
         valid_dataloader = data_generator(valid_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
-        train_batch_generator = DataLoader(train_dataloader, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
-        valid_batch_generator = DataLoader(valid_dataloader, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
+        train_batch_generator = DataLoader(train_dataloader, drop_last=True, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
+        valid_batch_generator = DataLoader(valid_dataloader, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
               
         """    
         x_batch, b_batch, y_batch = train_dataloader[0]
@@ -240,16 +249,17 @@ class YOLO(object):
         val_best_loss = float('inf')
         
         for epoch in range(nb_epochs):
-            self.train_epoch(self.Yolo, train_batch_generator, optimizer, self.custom_loss)
+            print('training the {} th epoch ...'.format(epoch))
+            #self.train_epoch(self.Yolo, train_batch_generator, optimizer, self.custom_loss)
             val_loss = self.val_epoch(self.Yolo, valid_batch_generator, self.custom_loss)
             if val_loss < val_best_loss:
                 val_best_loss = val_loss
                 torch.save(self.Yolo.state_dict(), saved_weights_name)
-                
-                
+                                
         ############################################
         # Compute mAP on the validation set
         ############################################
+        print('evaluating the validation set ... ')
         average_precisions = self.evaluate(valid_dataloader)     
 
         # print evaluation
@@ -259,12 +269,10 @@ class YOLO(object):
         
     def train_epoch(self, model, dataloader, optimizer, criterion):
         model.train(True)
-        for x_batch, b_batch, y_batch in dataloader:
+        for x_batch, b_batch, y_batch in tqdm(dataloader):
             x_batch, b_batch, y_batch = x_batch.cuda().float(), b_batch.cuda().float(), y_batch.cuda().float()
-            print(x_batch.shape)
             model.zero_grad()
             y_batch_pred = model(x_batch)
-            print(y_batch.shape)
             loss = criterion(y_batch_pred, y_batch, b_batch)
             loss.backward()
             optimizer.step()
@@ -272,10 +280,11 @@ class YOLO(object):
     def val_epoch(self, model, dataloader, criterion):
         model.train(False)
         loss = 0
-        for x_batch, b_batch, y_batch in dataloader:
-            x_batch, b_batch, y_batch = x_batch.cuda(), b_batch.cuda(), y_batch.cuda()
-            y_batch_pred = model(x_batch)
-            loss += criterion(y_batch_pred, y_batch, b_batch)
+        with torch.no_grad():
+            for x_batch, b_batch, y_batch in tqdm(dataloader):
+                x_batch, b_batch, y_batch = x_batch.cuda().float(), b_batch.cuda().float(), y_batch.cuda().float()
+                y_batch_pred = model(x_batch)
+                loss += criterion(y_batch_pred, y_batch, b_batch).data.cpu()
         return loss
     
     def evaluate(self, 
@@ -294,7 +303,7 @@ class YOLO(object):
             raw_height, raw_width, raw_channels = raw_image.shape
 
             # make the boxes and the labels
-            pred_boxes  = self.predict(image)
+            pred_boxes  = self.predict(raw_image)
 
             score = np.array([box.score for box in pred_boxes])
             pred_labels = np.array([box.label for box in pred_boxes])        
@@ -384,10 +393,10 @@ class YOLO(object):
         image = self.Yolo.normalize(image)
 
         input_image = image[:,:,::-1].transpose(2, 0, 1)
-        input_image = np.expand_dims(input_image, 0)
+        input_image = torch.Tensor(np.expand_dims(input_image, 0).copy()).cuda()
 
         netout = self.Yolo(input_image)
-        boxes  = decode_netout(netout, self.anchors, self.nb_class)
+        boxes  = decode_netout(netout.data.numpy(), self.anchors, self.nb_class)
 
         return boxes
     

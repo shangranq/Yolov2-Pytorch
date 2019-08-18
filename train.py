@@ -4,9 +4,13 @@ import numpy as np
 from util import parse_annotation
 from frontend import YOLO
 import json
+import torch
 
-os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+# os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+# os.environ["CUDA_VISIBLE_DEVICES"]="2"
+
+print ('Available devices ', torch.cuda.device_count())
+print ('Current cuda device ', torch.cuda.current_device())
 
 argparser = argparse.ArgumentParser(
     description='Train and validate YOLO_v2 model on COCO 2014 dataset')
