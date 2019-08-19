@@ -224,14 +224,6 @@ def _softmax(x, axis=-1, t=-100.):
 def load_image(filename):
     image = cv2.imread(filename)
     return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    
-def plot_anchor(xmin, xmax, ymin, ymax, iobj, w):
-    color_palette = list(sns.xkcd_rgb.values())
-    c = color_palette[iobj]
-    plt.plot(np.array([xmin,xmin]), np.array([ymin,ymax]), color=c, linewidth=w)
-    plt.plot(np.array([xmin,xmax]), np.array([ymin,ymin]), color=c, linewidth=w)
-    plt.plot(np.array([xmax,xmax]), np.array([ymax,ymin]), color=c, linewidth=w)
-    plt.plot(np.array([xmin,xmax]), np.array([ymax,ymax]), color=c, linewidth=w)
 
 def draw_boxes(image, xmin, xmax, ymin, ymax, label):
     image_h, image_w, _ = image.shape
@@ -244,8 +236,10 @@ def draw_boxes(image, xmin, xmax, ymin, ymax, label):
                (a,b,c), 2)
     return image    
                    
-def plot_image_anchors(index):
-    image = train_image[index]
+def plot_image_anchors(images, index):
+    if not os.path.exists('./sample/'):
+        os.mkdir('./sample')
+    image = images[index]
     image_path = image['filename']
     objects = image['object']
     image = load_image(image_path)
@@ -253,16 +247,15 @@ def plot_image_anchors(index):
         x_min, x_max, y_min, y_max = obj['xmin'], obj['xmax'], obj['ymin'], obj['ymax']
         image = draw_boxes(image, x_min, x_max, y_min, y_max, obj['name'])
     plt.imshow(image)
-    plt.show()
-
+    plt.savefig('./sample/image{}.png'.format(index))
 
 if __name__ == '__main__': 
-    ##annotations
-    train_annot_folder = '/data/datasets/COCO/new_annotations/'
-    train_image_folder = '/data/datasets/COCO/train2014/' 
-    train_image = parse_annotation(train_annot_folder, train_image_folder)
-    print("N train = {}".format(len(train_image)))
-    print(train_image[0])
-    for i in range(60, 61):
-        plot_image_anchors(0)
+    annot_folder = '/data/datasets/COCO/val2014_annotations/'
+    image_folder = '/data/datasets/COCO/val2014/' 
+    images, _ = parse_annotation(annot_folder, image_folder)
+   
+    for i in range(60, 70):
+        print("visualzing the {} th image".format(i))
+        print(images[i])
+        plot_image_anchors(images, i)
 
