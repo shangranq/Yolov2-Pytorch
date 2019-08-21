@@ -104,6 +104,12 @@ The config.json passes in the hyperparameters and data paths into the train.py s
 }
 ```
 
+## evaluate the model
+At the end of the training, mAP was evaluated, this implementation mAP is 0.1896. 
+Visualize some of the testing images with ground truth and predicted bounding boxes. 
+
+
+
 
 
 
