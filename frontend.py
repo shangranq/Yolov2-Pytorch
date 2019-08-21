@@ -33,7 +33,7 @@ class YOLO(object):
         self.Yolo = Yolo_v2(nb_box=self.nb_box, nb_class=self.nb_class, feature_extractor=feature_extractor)
         self.Yolo = self.Yolo.cuda()        
 
-    def custom_loss(self, y_true, y_pred, true_boxes):
+    def custom_loss(self, y_pred, y_true, true_boxes):
         
         # y_true and y_pred shape (batch, box, 5+nb_class, grid_h, grid_w)
         # true_boxes shape (batch, 1, 1, 1, max_boxes_per_image, 4)
@@ -41,6 +41,7 @@ class YOLO(object):
         # swap axies from channel first to channel last
         y_true = y_true.permute(0, 3, 4, 1, 2)
         y_pred = y_pred.permute(0, 3, 4, 1, 2)
+
         # print(y_true.shape, y_pred.shape, true_boxes.shape)
         # y_true and y_pred shape (batch, grid_h, grid_w, box, 5+nb_class)
         # true_boxes shape (batch, 1, 1, 1, max_boxes_per_image, 4)
@@ -167,6 +168,8 @@ class YOLO(object):
         nb_coord_box = torch.sum(torch.gt(coord_mask, 0.0).float())
         nb_conf_box  = torch.sum(torch.gt(conf_mask, 0.0).float())
         nb_class_box = torch.sum(torch.gt(class_mask, 0.0).float())
+
+        # wrong print(nb_coord_box, nb_conf_box, nb_class_box)
         
         loss_xy    = torch.sum((true_box_xy-pred_box_xy)**2     * coord_mask) / (nb_coord_box + 1e-6) / 2.
         loss_wh    = torch.sum((true_box_wh-pred_box_wh)**2     * coord_mask) / (nb_coord_box + 1e-6) / 2.
@@ -180,6 +183,7 @@ class YOLO(object):
         loss_class = (loss_class * class_mask).sum() / (nb_class_box + 1e-6)
 
         loss = loss_xy + loss_wh + loss_conf + loss_class
+        # print('loss', loss, "xy", loss_xy, "wh", loss_wh, "conf", loss_conf, "class", loss_class)
      
         return loss
     
@@ -232,18 +236,23 @@ class YOLO(object):
         valid_dataloader = data_generator(valid_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
         test_dataloader = data_generator(test_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
         train_batch_generator = DataLoader(train_dataloader, drop_last=True, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
-        valid_batch_generator = DataLoader(valid_dataloader, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
-                    
+        valid_batch_generator = DataLoader(valid_dataloader, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])         
   
-        """    
+        """
         x_batch, b_batch, y_batch = train_dataloader[0]
         print(x_batch.shape, b_batch.shape, y_batch.shape)
-        plt.imshow(x_batch.transpose(1,2,0))
-        plt.show()
-        plt.imshow(train_dataloader.load_image(0)[:, :, ::-1])
-        plt.show()
-        """        
-
+        for i in range(5):
+            for j in range(13):
+                for k in range(13):
+                    if y_batch[i, 0, j, k] != 0:
+                        print(y_batch[i, :, j, k])
+        #plt.imshow(x_batch.transpose(1,2,0))
+        #plt.show()
+        #plt.imshow(train_dataloader.load_image(0)[:, :, ::-1])
+        #plt.show()
+        return
+        """ 
+               
         ############################################
         # Start the training process
         ############################################
@@ -275,7 +284,7 @@ class YOLO(object):
         
     def train_epoch(self, model, dataloader, optimizer, criterion):
         model.train(True)
-        for x_batch, b_batch, y_batch in tqdm(dataloader):
+        for x_batch, b_batch, y_batch in dataloader:
             x_batch, b_batch, y_batch = x_batch.cuda().float(), b_batch.cuda().float(), y_batch.cuda().float()
             model.zero_grad()
             y_batch_pred = model(x_batch)
@@ -287,7 +296,7 @@ class YOLO(object):
         model.train(False)
         loss = 0
         with torch.no_grad():
-            for x_batch, b_batch, y_batch in tqdm(dataloader):
+            for x_batch, b_batch, y_batch in dataloader:
                 x_batch, b_batch, y_batch = x_batch.cuda().float(), b_batch.cuda().float(), y_batch.cuda().float()
                 y_batch_pred = model(x_batch)
                 loss += criterion(y_batch_pred, y_batch, b_batch).data.cpu()
@@ -304,7 +313,7 @@ class YOLO(object):
         all_detections = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
         all_annotations = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
 
-        for i in tqdm(range(len(generator))):
+        for i in range(len(generator)):
             raw_image = generator.load_image(i)
             raw_height, raw_width, raw_channels = raw_image.shape
 

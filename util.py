@@ -11,7 +11,7 @@ def parse_annotation(ann_dir, img_dir, labels=[]):
     all_imgs = []
     seen_labels = {}
     
-    for ann in tqdm(sorted(os.listdir(ann_dir))):
+    for ann in sorted(os.listdir(ann_dir)):
         img = {'object':[]}
 
         tree = ET.parse(ann_dir + ann)
