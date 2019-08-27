@@ -6,7 +6,7 @@ import os
 from tqdm import tqdm
 import cv2
 import matplotlib.pyplot as plt
-from util import decode_netout, compute_overlap, compute_ap
+from util import decode_netout, compute_overlap, compute_ap, draw_boxes_object
 from backend import Yolo_v2
 import torch.nn as nn
 from dataloader import data_generator
@@ -15,7 +15,8 @@ from dataloader import data_generator
 class YOLO(object):
     def __init__(self, feature_extractor,
                        input_size, 
-                       labels, 
+                       labels,
+ 
                        max_box_per_image,
                        anchors):
 
@@ -32,6 +33,19 @@ class YOLO(object):
         # make the Yolo model
         self.Yolo = Yolo_v2(nb_box=self.nb_box, nb_class=self.nb_class, feature_extractor=feature_extractor)
         self.Yolo = self.Yolo.cuda()        
+
+        self.generator_config = {
+            'IMAGE_H'         : self.input_size,
+            'IMAGE_W'         : self.input_size,
+            'GRID_H'          : self.grid_h,
+            'GRID_W'          : self.grid_w,
+            'BOX'             : self.nb_box,
+            'LABELS'          : self.labels,
+            'CLASS'           : len(self.labels),
+            'ANCHORS'         : self.anchors,
+            'BATCH_SIZE'      : self.batch_size,
+            'TRUE_BOX_BUFFER' : self.max_box_per_image,
+        }
 
     def custom_loss(self, y_pred, y_true, true_boxes):
         
@@ -188,7 +202,7 @@ class YOLO(object):
         return loss
     
     def load_weights(self, weight_path):
-        self.model.load_state_dict(torch.load(weight_path))     
+        self.Yolo.load_state_dict(torch.load(weight_path))     
     
     def train(self, train_imgs,     # the list of images to train the model
                     valid_imgs,     # the list of images used to validate the model after each epoch
@@ -219,24 +233,11 @@ class YOLO(object):
         # Make train and validation generators
         ############################################
 
-        generator_config = {
-            'IMAGE_H'         : self.input_size, 
-            'IMAGE_W'         : self.input_size,
-            'GRID_H'          : self.grid_h,  
-            'GRID_W'          : self.grid_w,
-            'BOX'             : self.nb_box,
-            'LABELS'          : self.labels,
-            'CLASS'           : len(self.labels),
-            'ANCHORS'         : self.anchors,
-            'BATCH_SIZE'      : self.batch_size,
-            'TRUE_BOX_BUFFER' : self.max_box_per_image,
-        }  
-
-        train_dataloader = data_generator(train_imgs, generator_config, norm=self.Yolo.normalize)
-        valid_dataloader = data_generator(valid_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
-        test_dataloader = data_generator(test_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
-        train_batch_generator = DataLoader(train_dataloader, drop_last=True, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
-        valid_batch_generator = DataLoader(valid_dataloader, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])         
+        train_dataloader = data_generator(train_imgs, self.generator_config, norm=self.Yolo.normalize)
+        valid_dataloader = data_generator(valid_imgs, self.generator_config, norm=self.Yolo.normalize, jitter=False)
+        # test_dataloader = data_generator(test_imgs, self.generator_config, norm=self.Yolo.normalize, jitter=False)
+        train_batch_generator = DataLoader(train_dataloader, drop_last=True, shuffle=True, batch_size=self.generator_config['BATCH_SIZE'])
+        valid_batch_generator = DataLoader(valid_dataloader, drop_last=True, shuffle=False, batch_size=self.generator_config['BATCH_SIZE'])         
   
         """
         x_batch, b_batch, y_batch = train_dataloader[0]
@@ -275,7 +276,7 @@ class YOLO(object):
         # Compute mAP on the validation set
         ############################################
         print('evaluating the testing set mAP ... ')
-        average_precisions = self.evaluate(test_dataloader)     
+        average_precisions = self.evaluate(test_imgs)     
 
         # print evaluation
         for label, average_precision in average_precisions.items():
@@ -303,12 +304,14 @@ class YOLO(object):
         return loss
     
     def evaluate(self, 
-                 generator, 
+                 test_imgs, 
                  iou_threshold=0.3,
                  score_threshold=0.3,
                  max_detections=100,
                  save_path=None):
   
+        generator = data_generator(test_imgs, self.generator_config, norm=self.Yolo.normalize, jitter=False)
+
         # gather all detections and annotations
         all_detections = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
         all_annotations = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
@@ -319,6 +322,10 @@ class YOLO(object):
 
             # make the boxes and the labels
             pred_boxes  = self.predict(raw_image)
+
+            if i < 20:
+                image_bbox = draw_boxes_object(raw_image, pred_boxes)
+                cv2.imwrite('./sample/test_{}.png'.format(i), image_bbox)
 
             score = np.array([box.score for box in pred_boxes])
             pred_labels = np.array([box.label for box in pred_boxes])        
