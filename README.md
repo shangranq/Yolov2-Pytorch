@@ -110,9 +110,18 @@ To evaluate the model performance on testing set, run
 python test.py -c config.json
 ```
 mAP will be printed for each class and for all classes, this implementation's overall mAP is 0.1896. 
+
+## Perform detection using trained weights on an image by running
+```
+python predict.py -c config.json -w /path/to/best_weights.pth -i /path/to/image/or/video
+```
+It carries out detection on the image and write the image with detected bounding boxes to the same folder.
+
 Some of the testing images with predicted bounding boxes will be saved in the sample/ folder with file name "test*.png".
 <img src="sample/test_11.png" width="225"/> <img src="sample/test_13.png" width="225"/>
 <img src="sample/test_8.png" width="225"/> 
+
+
 
 
 
