@@ -16,7 +16,6 @@ class YOLO(object):
     def __init__(self, feature_extractor,
                        input_size, 
                        labels,
- 
                        max_box_per_image,
                        anchors):
 
@@ -32,20 +31,8 @@ class YOLO(object):
 
         # make the Yolo model
         self.Yolo = Yolo_v2(nb_box=self.nb_box, nb_class=self.nb_class, feature_extractor=feature_extractor)
-        self.Yolo = self.Yolo.cuda()        
+        self.Yolo = self.Yolo.cuda()
 
-        self.generator_config = {
-            'IMAGE_H'         : self.input_size,
-            'IMAGE_W'         : self.input_size,
-            'GRID_H'          : self.grid_h,
-            'GRID_W'          : self.grid_w,
-            'BOX'             : self.nb_box,
-            'LABELS'          : self.labels,
-            'CLASS'           : len(self.labels),
-            'ANCHORS'         : self.anchors,
-            'BATCH_SIZE'      : self.batch_size,
-            'TRUE_BOX_BUFFER' : self.max_box_per_image,
-        }
 
     def custom_loss(self, y_pred, y_true, true_boxes):
         
@@ -233,11 +220,24 @@ class YOLO(object):
         # Make train and validation generators
         ############################################
 
-        train_dataloader = data_generator(train_imgs, self.generator_config, norm=self.Yolo.normalize)
-        valid_dataloader = data_generator(valid_imgs, self.generator_config, norm=self.Yolo.normalize, jitter=False)
-        # test_dataloader = data_generator(test_imgs, self.generator_config, norm=self.Yolo.normalize, jitter=False)
-        train_batch_generator = DataLoader(train_dataloader, drop_last=True, shuffle=True, batch_size=self.generator_config['BATCH_SIZE'])
-        valid_batch_generator = DataLoader(valid_dataloader, drop_last=True, shuffle=False, batch_size=self.generator_config['BATCH_SIZE'])         
+        generator_config = {
+            'IMAGE_H'         : self.input_size,
+            'IMAGE_W'         : self.input_size,
+            'GRID_H'          : self.grid_h,
+            'GRID_W'          : self.grid_w,
+            'BOX'             : self.nb_box,
+            'LABELS'          : self.labels,
+            'CLASS'           : len(self.labels),
+            'ANCHORS'         : self.anchors,
+            'BATCH_SIZE'      : self.batch_size,
+            'TRUE_BOX_BUFFER' : self.max_box_per_image,
+        }
+
+        train_dataloader = data_generator(train_imgs, generator_config, norm=self.Yolo.normalize)
+        valid_dataloader = data_generator(valid_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
+        # test_dataloader = data_generator(test_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
+        train_batch_generator = DataLoader(train_dataloader, drop_last=True, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
+        valid_batch_generator = DataLoader(valid_dataloader, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
   
         """
         x_batch, b_batch, y_batch = train_dataloader[0]
@@ -309,8 +309,21 @@ class YOLO(object):
                  score_threshold=0.3,
                  max_detections=100,
                  save_path=None):
+
+        generator_config = {
+            'IMAGE_H'         : self.input_size,
+            'IMAGE_W'         : self.input_size,
+            'GRID_H'          : self.grid_h,
+            'GRID_W'          : self.grid_w,
+            'BOX'             : self.nb_box,
+            'LABELS'          : self.labels,
+            'CLASS'           : len(self.labels),
+            'ANCHORS'         : self.anchors,
+            'BATCH_SIZE'      : 1,
+            'TRUE_BOX_BUFFER' : self.max_box_per_image,
+        }
   
-        generator = data_generator(test_imgs, self.generator_config, norm=self.Yolo.normalize, jitter=False)
+        generator = data_generator(test_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
 
         # gather all detections and annotations
         all_detections = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
@@ -324,7 +337,7 @@ class YOLO(object):
             pred_boxes  = self.predict(raw_image)
 
             if i < 20:
-                image_bbox = draw_boxes_object(raw_image, pred_boxes)
+                image_bbox = draw_boxes_object(raw_image, pred_boxes, self.labels)
                 cv2.imwrite('./sample/test_{}.png'.format(i), image_bbox)
 
             score = np.array([box.score for box in pred_boxes])
