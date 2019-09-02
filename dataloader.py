@@ -8,28 +8,8 @@ import cv2
 import copy
 import imgaug as ia
 from imgaug import augmenters as iaa
+from util import bbox_iou, BoundBox
 
-class BoundBox:
-    def __init__(self, xmin, ymin, xmax, ymax, c = None, classes = None):
-        self.xmin = xmin
-        self.ymin = ymin
-        self.xmax = xmax
-        self.ymax = ymax
-        self.c     = c
-        self.classes = classes
-        self.label = -1
-        self.score = -1
-
-    def get_label(self):
-        if self.label == -1:
-            self.label = np.argmax(self.classes)
-        return self.label
-    
-    def get_score(self):
-        if self.score == -1:
-            self.score = self.classes[self.get_label()]
-        return self.score
-    
 
 class BestAnchorBoxFinder(object):
     def __init__(self, ANCHORS):
@@ -43,29 +23,6 @@ class BestAnchorBoxFinder(object):
         self.anchors = [BoundBox(0, 0, ANCHORS[2*i], ANCHORS[2*i+1]) 
                         for i in range(int(len(ANCHORS)//2))]
         
-    def _interval_overlap(self, interval_a, interval_b):
-        x1, x2 = interval_a
-        x3, x4 = interval_b
-        if x3 < x1:
-            if x4 < x1:
-                return 0
-            else:
-                return min(x2,x4) - x1
-        else:
-            if x2 < x3:
-                 return 0
-            else:
-                return min(x2,x4) - x3  
-
-    def bbox_iou(self, box1, box2):
-        intersect_w = self._interval_overlap([box1.xmin, box1.xmax], [box2.xmin, box2.xmax])
-        intersect_h = self._interval_overlap([box1.ymin, box1.ymax], [box2.ymin, box2.ymax])  
-        intersect = intersect_w * intersect_h
-        w1, h1 = box1.xmax-box1.xmin, box1.ymax-box1.ymin
-        w2, h2 = box2.xmax-box2.xmin, box2.ymax-box2.ymin
-        union = w1*h1 + w2*h2 - intersect
-        return float(intersect) / union
-    
     def find(self, center_w, center_h):
         # find the anchor that has highest IOU with this ground truth box
         best_anchor = -1
@@ -73,7 +30,7 @@ class BestAnchorBoxFinder(object):
         shifted_box = BoundBox(0, 0, center_w, center_h)
         for i in range(len(self.anchors)):
             anchor = self.anchors[i]
-            iou    = self.bbox_iou(shifted_box, anchor)
+            iou    = bbox_iou(shifted_box, anchor)
             if max_iou < iou:
                 best_anchor = i
                 max_iou = iou
@@ -103,6 +60,7 @@ def rescale_cebterwh(obj, config):
 
 
 class data_generator(Dataset):
+
     def __init__(self, images, config, jitter=True, norm=None):
         self.images = images
         self.config = config
@@ -138,7 +96,6 @@ class data_generator(Dataset):
             ],
             random_order=True
         )
-        
 
     def __len__(self):
         return len(self.images)
@@ -212,12 +169,7 @@ class data_generator(Dataset):
         return image, all_objs
 
     def __getitem__(self, idx):
-        """
-        for a single image: 
-            x_batch (3, 416, 416)
-            b_batch (true_box_buffer, 4)
-            y_batch (5+nb_class, 13, 13)
-        """
+
         x_batch = np.zeros((3, self.config['IMAGE_H'], self.config['IMAGE_W']))                      
         b_batch = np.zeros((1, 1, 1, self.config['TRUE_BOX_BUFFER'], 4))  
         y_batch = np.zeros((self.config['BOX'], 4+1+len(self.config['LABELS']), self.config['GRID_H'], self.config['GRID_W']))     

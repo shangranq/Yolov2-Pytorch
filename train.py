@@ -63,9 +63,10 @@ def _main_(args):
     if len(config['model']['labels']) > 0:
         overlap_labels = set(config['model']['labels']).intersection(set(train_labels.keys()))
 
-        print('Seen labels:\t', train_labels)
-        print('Given labels:\t', config['model']['labels'])
-        print('Overlap labels:\t', overlap_labels)           
+        print('Seen labels:\t', len(train_labels))
+        print('Given labels:\t', len(config['model']['labels']))
+        print('Overlap labels:\t', len(overlap_labels))
+        print(overlap_labels)
 
         if len(overlap_labels) < len(config['model']['labels']):
             print('Some labels have no annotations! Please revise the list of labels in the config.json file!')
@@ -92,12 +93,9 @@ def _main_(args):
     yolo.train(train_imgs         = train_imgs,
                valid_imgs         = valid_imgs,
                test_imgs          = test_imgs,
-               train_times        = config['train']['train_times'],
-               valid_times        = config['valid']['valid_times'],
-               nb_epochs          = config['train']['nb_epochs'], 
+               nb_epochs          = config['train']['nb_epochs'],
                learning_rate      = config['train']['learning_rate'], 
                batch_size         = config['train']['batch_size'],
-               warmup_epochs      = config['train']['warmup_epochs'],
                object_scale       = config['train']['object_scale'],
                no_object_scale    = config['train']['no_object_scale'],
                coord_scale        = config['train']['coord_scale'],

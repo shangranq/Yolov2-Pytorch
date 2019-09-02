@@ -1,42 +1,44 @@
 {
     "model" : {
-        "backend":              "MobileNet",
+        "backend":              "ResNet",
         "input_size":           416,
         "anchors":              [0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828], 
         "max_box_per_image":    50,        
-        "labels":               []
+        "labels":               ["bowl", "broccoli", "orange", "giraffe", "potted plant", "vase", "zebra", "umbrella",
+                                "person", "horse", "elephant", "car", "truck", "stop sign", "clock", "train", "skateboard",
+                                "airplane", "knife", "oven", "microwave", "book", "fork", "cake", "dog", "bench", "chair",
+                                "pizza", "dining table", "cup", "spoon", "handbag", "refrigerator", "sink", "bottle", "banana",
+                                "sandwich", "kite", "tie", "scissors", "snowboard", "bus", "suitcase", "frisbee", "wine glass",
+                                "teddy bear", "hot dog", "carrot", "sports ball", "skis", "backpack", "couch", "mouse", "remote",
+                                "laptop", "boat", "tennis racket", "donut", "cat", "traffic light", "bed", "motorcycle", "bicycle",
+                                "cell phone", "toilet", "toothbrush", "tv", "apple", "surfboard", "keyboard", "bird", "fire hydrant",
+                                "cow", "baseball bat", "sheep", "bear", "baseball glove", "toaster", "parking meter", "hair drier"]
     },
 
     "train": {
         "train_image_folder":   "/data/datasets/COCO/train2014/",
         "train_annot_folder":   "/data/datasets/COCO/train2014_annotations/",     
           
-        "train_times":          1,
         "pretrained_weights":   "",
         "batch_size":           16,
         "learning_rate":        1e-4,
-        "nb_epochs":            10,
-        "warmup_epochs":        0,
-
-        "object_scale":         5.0 ,
+        "nb_epochs":            30,
+        "object_scale":         5.0,
         "no_object_scale":      1.0,
         "coord_scale":          1.0,
         "class_scale":          1.0,
-
-        "saved_weights_name":   "full_yolo.pth",
-        "debug":                true
+        "saved_weights_name":   "ResNet_COCO.pth",
+        "debug":                false
     },
 
     "valid": {
         "valid_image_folder":   "",
-        "valid_annot_folder":   "",
-        "valid_times":          1
+        "valid_annot_folder":   ""
     },
 
     "test": {
         "test_image_folder":   "/data/datasets/COCO/val2014/",
-        "test_annot_folder":   "/data/datasets/COCO/val2014_annotations/",
-        "test_times":          1
+        "test_annot_folder":   "/data/datasets/COCO/val2014_annotations/"
     }
 }
 

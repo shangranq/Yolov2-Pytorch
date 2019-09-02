@@ -5,9 +5,45 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
-from dataloader import BoundBox
+
+
+class WeightReader:
+    def __init__(self, weight_file):
+        self.offset = 4
+        self.all_weights = np.fromfile(weight_file, dtype='float32')
+
+    def read_bytes(self, size):
+        self.offset = self.offset + size
+        return self.all_weights[self.offset - size:self.offset]
+
+    def reset(self):
+        self.offset = 4
+
+
+class BoundBox:
+    def __init__(self, xmin, ymin, xmax, ymax, c=None, classes=None):
+        self.xmin = xmin
+        self.ymin = ymin
+        self.xmax = xmax
+        self.ymax = ymax
+        self.c = c
+        self.classes = classes
+        self.label = -1
+        self.score = -1
+
+    def get_label(self):
+        if self.label == -1:
+            self.label = np.argmax(self.classes)
+        return self.label
+
+    def get_score(self):
+        if self.score == -1:
+            self.score = self.classes[self.get_label()]
+        return self.score
+
 
 def parse_annotation(ann_dir, img_dir, labels=[]):
+
     all_imgs = []
     seen_labels = {}
     
@@ -79,10 +115,10 @@ def draw_boxes_object(image, boxes, labels):
         cv2.rectangle(image, (xmin,ymin), (xmax,ymax), (a, b, c), 3)
         cv2.putText(image, 
                     labels[box.get_label()] + ' ' + str(box.get_score()), 
-                    (xmin, ymin - 13), 
+                    (xmin, ymin+20),
                     cv2.FONT_HERSHEY_SIMPLEX, 
                     1e-3 * image_h, 
-                    (0,255,0), 2)
+                    (a, b, c), 2)
     return image
 
 
@@ -193,7 +229,7 @@ def compute_ap(recall, precision):
     ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])
     return ap  
 
-        
+
 def _interval_overlap(interval_a, interval_b):
     x1, x2 = interval_a
     x3, x4 = interval_b
@@ -208,8 +244,10 @@ def _interval_overlap(interval_a, interval_b):
         else:
             return min(x2,x4) - x3          
 
+
 def _sigmoid(x):
     return 1. / (1. + np.exp(-x))
+
 
 def _softmax(x, axis=-1, t=-100.):
     x = x - np.max(x)
@@ -219,11 +257,10 @@ def _softmax(x, axis=-1, t=-100.):
     return e_x / e_x.sum(axis, keepdims=True)
 
 
-
-
 def load_image(filename):
     image = cv2.imread(filename)
     return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
 
 def draw_boxes(image, xmin, xmax, ymin, ymax, label):
     image_h, image_w, _ = image.shape
@@ -235,27 +272,30 @@ def draw_boxes(image, xmin, xmax, ymin, ymax, label):
                1e-3 * image_h, 
                (a,b,c), 2)
     return image    
-                   
+
+
 def plot_image_anchors(images, index):
     if not os.path.exists('./sample/'):
         os.mkdir('./sample')
     image = images[index]
     image_path = image['filename']
     objects = image['object']
-    image = load_image(image_path)
+    image = cv2.imread(image_path)
+
     for iobj, obj in enumerate(objects):
         x_min, x_max, y_min, y_max = obj['xmin'], obj['xmax'], obj['ymin'], obj['ymax']
         image = draw_boxes(image, x_min, x_max, y_min, y_max, obj['name'])
-    plt.imshow(image)
-    plt.savefig('./sample/image{}.png'.format(index))
+    cv2.imwrite('./sample/image_gt_box/test_{}.png'.format(index), image)
+
 
 if __name__ == '__main__': 
     annot_folder = '/data/datasets/COCO/val2014_annotations/'
     image_folder = '/data/datasets/COCO/val2014/' 
     images, _ = parse_annotation(annot_folder, image_folder)
    
-    for i in range(60, 70):
+    for i in range(0, 20):
         print("visualzing the {} th image".format(i))
         print(images[i])
         plot_image_anchors(images, i)
+
 

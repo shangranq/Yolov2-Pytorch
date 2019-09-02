@@ -13,6 +13,7 @@ from dataloader import data_generator
 
 
 class YOLO(object):
+
     def __init__(self, feature_extractor,
                        input_size, 
                        labels,
@@ -20,7 +21,6 @@ class YOLO(object):
                        anchors):
 
         self.input_size = input_size
-        
         self.labels   = list(labels)
         self.nb_class = len(self.labels)
         self.nb_box   = len(anchors)//2
@@ -32,7 +32,6 @@ class YOLO(object):
         # make the Yolo model
         self.Yolo = Yolo_v2(nb_box=self.nb_box, nb_class=self.nb_class, feature_extractor=feature_extractor)
         self.Yolo = self.Yolo.cuda()
-
 
     def custom_loss(self, y_pred, y_true, true_boxes):
         
@@ -184,8 +183,22 @@ class YOLO(object):
         loss_class = (loss_class * class_mask).sum() / (nb_class_box + 1e-6)
 
         loss = loss_xy + loss_wh + loss_conf + loss_class
-        # print('loss', loss, "xy", loss_xy, "wh", loss_wh, "conf", loss_conf, "class", loss_class)
-     
+
+        """
+        Debugging code
+        """
+        if self.debug:
+
+            nb_true_box = torch.sum(y_true[..., 4])
+            nb_pred_box = torch.sum(torch.gt(true_box_conf, 0.5).float() * torch.gt(pred_box_conf, 0.3).float())
+            current_recall = nb_pred_box.data / (nb_true_box.data + 1e-6)
+            print('loss_xy: ', loss_xy)
+            print('loss_wh: ', loss_wh)
+            print('loss_conf: ', loss_conf)
+            print('loss_class: ', loss_class)
+            print('current_recall: ', current_recall)
+            print('*'*80)
+
         return loss
     
     def load_weights(self, weight_path):
@@ -194,12 +207,9 @@ class YOLO(object):
     def train(self, train_imgs,     # the list of images to train the model
                     valid_imgs,     # the list of images used to validate the model after each epoch
                     test_imgs,      # the list of images used to test the model at the end of training 
-                    train_times,    # the number of time to repeat the training set, often used for small datasets
-                    valid_times,    # the number of times to repeat the validation set, often used for small datasets
                     nb_epochs,      # number of epoches
-                    learning_rate,  # the learning rate
-                    batch_size,     # the size of the batch
-                    warmup_epochs,  # number of initial batches to let the model familiarize with the new dataset
+                    learning_rate,
+                    batch_size,
                     object_scale,
                     no_object_scale,
                     coord_scale,
@@ -208,12 +218,10 @@ class YOLO(object):
                     debug=False):  
 
         self.batch_size = batch_size
-
         self.object_scale    = object_scale
         self.no_object_scale = no_object_scale
         self.coord_scale     = coord_scale
         self.class_scale     = class_scale
-
         self.debug = debug
 
         ############################################
@@ -235,25 +243,9 @@ class YOLO(object):
 
         train_dataloader = data_generator(train_imgs, generator_config, norm=self.Yolo.normalize)
         valid_dataloader = data_generator(valid_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
-        # test_dataloader = data_generator(test_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
         train_batch_generator = DataLoader(train_dataloader, drop_last=True, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
         valid_batch_generator = DataLoader(valid_dataloader, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
-  
-        """
-        x_batch, b_batch, y_batch = train_dataloader[0]
-        print(x_batch.shape, b_batch.shape, y_batch.shape)
-        for i in range(5):
-            for j in range(13):
-                for k in range(13):
-                    if y_batch[i, 0, j, k] != 0:
-                        print(y_batch[i, :, j, k])
-        #plt.imshow(x_batch.transpose(1,2,0))
-        #plt.show()
-        #plt.imshow(train_dataloader.load_image(0)[:, :, ::-1])
-        #plt.show()
-        return
-        """ 
-               
+
         ############################################
         # Start the training process
         ############################################
@@ -276,14 +268,12 @@ class YOLO(object):
         # Compute mAP on the validation set
         ############################################
         print('evaluating the testing set mAP ... ')
-        average_precisions = self.evaluate(test_imgs)     
+        average_precisions = self.evaluate(test_imgs)
 
-        # print evaluation
-        for label, average_precision in average_precisions.items():
-            print(self.labels[label], '{:.4f}'.format(average_precision))
-        print('mAP: {:.4f}'.format(sum(average_precisions.values()) / len(average_precisions)))     
-        
-    def train_epoch(self, model, dataloader, optimizer, criterion):
+    def train_epoch(self, model,
+                          dataloader,
+                          optimizer,
+                          criterion):
         model.train(True)
         for x_batch, b_batch, y_batch in dataloader:
             x_batch, b_batch, y_batch = x_batch.cuda().float(), b_batch.cuda().float(), y_batch.cuda().float()
@@ -293,7 +283,9 @@ class YOLO(object):
             loss.backward()
             optimizer.step()
             
-    def val_epoch(self, model, dataloader, criterion):
+    def val_epoch(self, model,
+                        dataloader,
+                        criterion):
         model.train(False)
         loss = 0
         with torch.no_grad():
@@ -306,9 +298,8 @@ class YOLO(object):
     def evaluate(self, 
                  test_imgs, 
                  iou_threshold=0.3,
-                 score_threshold=0.3,
-                 max_detections=100,
-                 save_path=None):
+                 obj_threshold=0.4,
+                 nms_threshold=0.3):
 
         generator_config = {
             'IMAGE_H'         : self.input_size,
@@ -334,11 +325,11 @@ class YOLO(object):
             raw_height, raw_width, raw_channels = raw_image.shape
 
             # make the boxes and the labels
-            pred_boxes  = self.predict(raw_image)
+            pred_boxes  = self.predict(raw_image, obj_threshold, nms_threshold)
 
-            if i < 20:
+            if i < 40:
                 image_bbox = draw_boxes_object(raw_image, pred_boxes, self.labels)
-                cv2.imwrite('./sample/test_{}.png'.format(i), image_bbox)
+                cv2.imwrite('./sample/image_pred_box/test_pred_{}.png'.format(i), image_bbox)
 
             score = np.array([box.score for box in pred_boxes])
             pred_labels = np.array([box.label for box in pred_boxes])        
@@ -420,9 +411,13 @@ class YOLO(object):
             average_precision  = compute_ap(recall, precision)  
             average_precisions[label] = average_precision
 
-        return average_precisions    
+        for label, average_precision in average_precisions.items():
+            print(self.labels[label], '{:.4f}'.format(average_precision))
+        print('mAP: {:.4f}'.format(sum(average_precisions.values()) / len(average_precisions)))
 
-    def predict(self, image):
+        return average_precisions
+
+    def predict(self, image, obj_threshold, nms_threshold):
         image_h, image_w, _ = image.shape
         image = cv2.resize(image, (self.input_size, self.input_size))
         image = self.Yolo.normalize(image)
@@ -431,17 +426,13 @@ class YOLO(object):
         input_image = torch.Tensor(np.expand_dims(input_image, 0).copy()).cuda()
 
         netout = self.Yolo(input_image)
-        boxes  = decode_netout(netout.data.cpu().numpy(), self.anchors, self.nb_class)
+        boxes  = decode_netout(netout.data.cpu().numpy(), self.anchors, self.nb_class, obj_threshold=obj_threshold, nms_threshold=nms_threshold)
 
         return boxes
     
             
             
      
-            
-     
-        
-        
 
         
     
