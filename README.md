@@ -49,8 +49,8 @@ Before we move to the model training and testing, we can visualize some sample i
 ```
 python util.py
 ```
-The generated images will be saved in the sample folder and here are some samples:
-<img src="sample/image_gt_box/test_1.png" width="325"/> <img src="sample/image_gt_box/test_11.png" width="273"/>
+The generated images will be saved in the sample/image_gt_box/ folder and here are some samples:
+<img src="sample/image_gt_box/test_1.png" width="325"/> <img src="sample/image_gt_box/test_11.png" width="293"/>
 <img src="sample/image_gt_box/test_13.png" width="258"/> <img src="sample/image_gt_box/test_16.png" width="500"/>
 
 
@@ -63,46 +63,53 @@ The config.json passes in the hyperparameters and data paths into the train.py s
 ```
 {
     "model" : {
-        "backend":              "MobileNet",
+        "backend":              "ResNet",
         "input_size":           416,
-        "anchors":              [0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828],
-        "max_box_per_image":    50,
-        "labels":               []
+        "anchors":              [0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828], 
+        "max_box_per_image":    50,        
+        "labels":               ["bowl", "broccoli", "orange", "giraffe", "potted plant", "vase", "zebra", "umbrella",
+                                "person", "horse", "elephant", "car", "truck", "stop sign", "clock", "train", "skateboard",
+                                "airplane", "knife", "oven", "microwave", "book", "fork", "cake", "dog", "bench", "chair",
+                                "pizza", "dining table", "cup", "spoon", "handbag", "refrigerator", "sink",       
+                                "bottle","banana","sandwich", "kite", "tie", "scissors", "snowboard", "bus", "suitcase", 
+                                "frisbee", "wine glass","teddy bear", "hot dog", "carrot", "sports ball", "skis", "backpack", 
+                                "couch", "mouse", "remote","laptop", "boat", "tennis racket", "donut", "cat", "traffic light", 
+                                "bed", "motorcycle", "bicycle","cell phone", "toilet", "toothbrush", "tv", "apple", 
+                                "surfboard", "keyboard", "bird", "fire hydrant","cow", "baseball bat", "sheep", "bear", 
+                                "baseball glove", "toaster", "parking meter", "hair drier"]
     },
 
     "train": {
         "train_image_folder":   "/data/datasets/COCO/train2014/",
-        "train_annot_folder":   "/data/datasets/COCO/train2014_annotations/",
-
-        "train_times":          1,
+        "train_annot_folder":   "/data/datasets/COCO/train2014_annotations/",     
+          
         "pretrained_weights":   "",
         "batch_size":           16,
         "learning_rate":        1e-4,
-        "nb_epochs":            10,
-        "warmup_epochs":        0,
-
-        "object_scale":         5.0 ,
+        "nb_epochs":            30,
+        "object_scale":         5.0,
         "no_object_scale":      1.0,
         "coord_scale":          1.0,
         "class_scale":          1.0,
-
-        "saved_weights_name":   "full_yolo.pth",
-        "debug":                true
+        "warmup_epochs":        100,
+        "saved_weights_name":   "ResNet_COCO.pth",
+        "debug":                false
     },
 
     "valid": {
         "valid_image_folder":   "",
-        "valid_annot_folder":   "",
-        "valid_times":          1
+        "valid_annot_folder":   ""
     },
 
     "test": {
         "test_image_folder":   "/data/datasets/COCO/val2014/",
-        "test_annot_folder":   "/data/datasets/COCO/val2014_annotations/",
-        "test_times":          1
+        "test_annot_folder":   "/data/datasets/COCO/val2014_annotations/"
     }
 }
 ```
+During training, if you set "debug" with True, each component of the loss, including loss_xy, loss_wh, loss_conf, loss_class, along with the recall of predictions for each mini-batch of data will be printed for you to debug the system. The selection of hypermarameters of the system is sensitive on the choice of backends and the task itself. You can learn more by playing with the hyperparameters and monitoring the trend of recall and loss. 
+
+At the end of training, evaluation of mAP will be performed afterwards and some sample testing images with predicted bounding boxes will be saved in /sample/image_pred_box/ folder. 
 
 ## evaluate the model
 To evaluate the model performance on testing set, run
@@ -111,6 +118,15 @@ python test.py -c config.json
 ```
 mAP will be printed for each class and for all classes, this implementation's overall mAP is 0.1896. 
 
+Currently, I am systematically performing experiments with various backends and will fill out the table below. 
+
+| Backend       | mAP (IOU=0.3)     | mAP (IOU=0.5)    |
+| :------------- | :----------: | -----------: |
+|  MobileNet | NA               | NA      |
+| ResNet     | NA               | NA      |
+| Full Yolo  | NA               | NA      |
+
+
 ## Perform detection using trained weights on an image by running
 ```
 python predict.py -c config.json -w /path/to/best_weights.pth -i /path/to/image/or/video
@@ -118,6 +134,8 @@ python predict.py -c config.json -w /path/to/best_weights.pth -i /path/to/image/
 It carries out detection on the image and write the image with detected bounding boxes to the same folder.
 
 Some of the testing images with predicted bounding boxes will be saved in the sample/ folder with file name "test*.png".
+Here are some samples of predictions for Yolo with Resnet50 backend. 
+
 <img src="sample/image_pred_box/test_pred_13.png" width="225"/> <img src="sample/image_pred_box/test_pred_15.png" width="525"/>
 <img src="sample/image_pred_box/test_pred_25.png" width="225"/> <img src="sample/image_pred_box/test_pred_31.png" width="625"/>
 <img src="sample/image_pred_box/test_pred_36.png" width="325"/><img src="sample/image_pred_box/test_pred_8.png" width="525"/>
