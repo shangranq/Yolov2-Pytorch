@@ -50,8 +50,8 @@ Before we move to the model training and testing, we can visualize some sample i
 python util.py
 ```
 The generated images will be saved in the sample folder and here are some samples:
-<img src="sample/image60.png" width="425"/> <img src="sample/image62.png" width="425"/>
-<img src="sample/image64.png" width="425"/> <img src="sample/image66.png" width="425"/>
+<img src="sample/image_gt_box/test_1.png" width="325"/> <img src="sample/image_gt_box/test_11.png" width="273"/>
+<img src="sample/image_gt_box/test_13.png" width="258"/> <img src="sample/image_gt_box/test_16.png" width="500"/>
 
 
 ## train the model
@@ -118,9 +118,9 @@ python predict.py -c config.json -w /path/to/best_weights.pth -i /path/to/image/
 It carries out detection on the image and write the image with detected bounding boxes to the same folder.
 
 Some of the testing images with predicted bounding boxes will be saved in the sample/ folder with file name "test*.png".
-<img src="sample/test_11.png" width="225"/> <img src="sample/test_13.png" width="225"/>
-<img src="sample/test_8.png" width="225"/> 
-
+<img src="sample/image_pred_box/test_pred_13.png" width="225"/> <img src="sample/image_pred_box/test_pred_15.png" width="525"/>
+<img src="sample/image_pred_box/test_pred_25.png" width="225"/> <img src="sample/image_pred_box/test_pred_31.png" width="625"/>
+<img src="sample/image_pred_box/test_pred_36.png" width="325"/><img src="sample/image_pred_box/test_pred_8.png" width="525"/>
 
 
 
