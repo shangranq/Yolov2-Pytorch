@@ -140,8 +140,19 @@ Here are some samples of predictions for Yolo with Resnet50 backend.
 <img src="sample/image_pred_box/test_pred_25.png" width="225"/> <img src="sample/image_pred_box/test_pred_31.png" width="625"/>
 <img src="sample/image_pred_box/test_pred_36.png" width="325"/><img src="sample/image_pred_box/test_pred_8.png" width="525"/>
 
-
-
+# Appendix
+| Variable name       | shape     | meaning    |
+| :------------- | :---------- | :----------- |
+|  cell_grid |  (batch_size, grid_h, grid_w, nb_box, 2) |  cell_grid[:, i, j, :, :] = [j, i] the upper_left corner locations of all cells in the grid scale where each cell has length 1    |
+| y_pred     | (batch_size, grid_h, grid_w, nb_box, 85) | output from the model with 85 channels, the first 4 channels are x, y, w, h, the 5th channel is the object confidence, the last 80 channels are 80 probabilities for all categories      |
+| y_true     | (batch_size, grid_h, grid_w, nb_box, 85) | ground truth tensor from data loader |
+| pred_box_xy     | (batch_size, grid_h, grid_w, nb_box, 2) | predicted x and y locations of the center of the bounding boxes  |
+| pred_box_wh     | (batch_size, grid_h, grid_w, nb_box, 2) | predicted widths and heights of the bounding boxes  |
+| pred_box_conf   | (batch_size, grid_h, grid_w, nb_box) | predicted object confidence of the bounding boxes range from 0 to 1 |
+| pred_box_class  | (batch_size, grid_h, grid_w, nb_box, 80) | predicted class probabilities of the bounding boxes |
+| true_box_xy     | (batch_size, grid_h, grid_w, nb_box, 2) | true x and y locations of the center of the bounding boxes |
+| true_box_wh     | (batch_size, grid_h, grid_w, nb_box, 2) | true widths and heights of the bounding boxes |
+| true_box_conf   | (batch_size, grid_h, grid_w, nb_box) | true widths and heights of the bounding boxes |
 
 
 
