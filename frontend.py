@@ -50,7 +50,7 @@ class YOLO(object):
         cell_x = np.reshape(np.tile(np.arange(self.grid_w), [self.grid_h]), (1, self.grid_h, self.grid_w, 1, 1))
         cell_y = np.transpose(cell_x, (0,2,1,3,4))
         # cell_grid shape (batch, grid_h, grid_w, nb_box, 2)
-        cell_grid = torch.from_numpy(np.tile(np.concatenate([cell_x,cell_y], -1), [self.batch_size, 1, 1, self.nb_box, 1]))
+        cell_grid = torch.from_numpy(np.tile(np.concatenate([cell_x,cell_y], -1), [self.batch_size, 1, 1, self.nb_box, 1])).cuda().float()
         # print(cell_grid.shape)
         # print(cell_grid[0, 4, 6, 0, :]==[6, 4])
 
@@ -61,7 +61,7 @@ class YOLO(object):
         # pred_box_xy shape (batch, grid_h, grid_w, box, 2)
         # sigmoid(y_pred_xy) returns the predicted location relative to the cell (one assumption is the cell length is 1)
         # adding cell_grid makes it the location relative to the whole image
-        pred_box_xy = torch.sigmoid(y_pred[..., :2]) + cell_grid.cuda().float()
+        pred_box_xy = torch.sigmoid(y_pred[..., :2]) + cell_grid
 
         ### adjust w and h
         # predicted bounding box height = anchor_box_h * exp(y_pred_h) 
@@ -162,7 +162,7 @@ class YOLO(object):
         ### class mask: simply the position of the ground truth boxes (the predictors)
         # class_mask = y_true[..., 4] * tf.gather(self.class_wt, true_box_class) * self.class_scale
         # need to figure out what is tf.gather 
-        class_mask = y_true[..., 4] * true_box_class.float() * self.class_scale      
+        class_mask = y_true[..., 4] * self.class_scale
  
         nb_coord_box = torch.sum(torch.gt(coord_mask, 0.0).float())
         nb_conf_box  = torch.sum(torch.gt(conf_mask, 0.0).float())
@@ -172,8 +172,8 @@ class YOLO(object):
         if self.warmup_batches:
             no_boxes_mask = torch.lt(coord_mask, self.coord_scale/2.).float()
             if self.batch_index <= self.warmup_batches:
-                true_box_xy = true_box_xy + (0.5 + cell_grid) * no_boxes_mask
-                true_box_wh = true_box_wh + torch.ones_like(true_box_wh) * torch.Tensor(np.reshape(self.anchors, [1,1,1,self.nb_box,2])) * no_boxes_mask
+                true_box_xy = true_box_xy + torch.add(cell_grid, 0.5) * no_boxes_mask
+                true_box_wh = true_box_wh + torch.ones_like(true_box_wh) * torch.Tensor(np.reshape(self.anchors, [1,1,1,self.nb_box,2])).float().cuda() * no_boxes_mask
                 coord_mask = torch.ones_like(coord_mask)
 
         loss_xy    = torch.sum((true_box_xy-pred_box_xy)**2     * coord_mask) / (nb_coord_box + 1e-6) / 2.
@@ -192,15 +192,17 @@ class YOLO(object):
         """
         Debugging code
         """
-        if self.debug:
+        if self.debug and self.batch_index % 100 == 0:
 
             nb_true_box = torch.sum(y_true[..., 4])
             nb_pred_box = torch.sum(torch.gt(true_box_conf, 0.5).float() * torch.gt(pred_box_conf, 0.3).float())
             current_recall = nb_pred_box.data / (nb_true_box.data + 1e-6)
+            print('batch index ', self.batch_index, '/ epoch index ', self.epoch_index)
             print('loss_xy: ', loss_xy)
             print('loss_wh: ', loss_wh)
             print('loss_conf: ', loss_conf)
             print('loss_class: ', loss_class)
+            print('loss: ', loss)
             print('current_recall: ', current_recall)
             print('*'*80)
 
@@ -232,6 +234,7 @@ class YOLO(object):
         self.class_scale     = class_scale
         self.debug = debug
         self.batch_index = 0
+        self.epoch_index = 0
         self.warmup_batches = warmup_batches
         self.train_last = train_last
 
@@ -242,6 +245,9 @@ class YOLO(object):
         if self.train_last:
             for param in self.Yolo.feature_extractor.parameters():
                 param.requires_grad = False
+        else:
+            for param in self.Yolo.feature_extractor.parameters():
+                param.requires_grad = True
 
         ############################################
         # Make train and validation generators
@@ -281,6 +287,8 @@ class YOLO(object):
             if val_loss < val_best_loss:
                 val_best_loss = val_loss
                 torch.save(self.Yolo.state_dict(), saved_weights_name)
+            self.epoch_index += 1
+            self.batch_index = 0
                                 
         ############################################
         # Compute mAP on the validation set
@@ -306,12 +314,14 @@ class YOLO(object):
                         criterion):
         model.train(False)
         loss = 0
+        batch_count = 0
         with torch.no_grad():
             for x_batch, b_batch, y_batch in dataloader:
-                x_batch, b_batch, y_batch = x_batch.cuda().float(), b_batch.cuda().float(), y_batch.cuda().float()
+                x_batch, b_batch, y_batch = x_batch.float().cuda(), b_batch.float().cuda(), y_batch.float().cuda()
                 y_batch_pred = model(x_batch)
                 loss += criterion(y_batch_pred, y_batch, b_batch).data.cpu()
-        return loss
+                batch_count += 1
+        return loss / batch_count
     
     def evaluate(self, 
                  test_imgs, 
