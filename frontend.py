@@ -28,13 +28,12 @@ class YOLO(object):
         self.anchors  = anchors
         self.grid_h, self.grid_w = 13, 13
         self.max_box_per_image = max_box_per_image
-
         # make the Yolo model
         self.Yolo = Yolo_v2(nb_box=self.nb_box, nb_class=self.nb_class, feature_extractor=feature_extractor)
         self.Yolo = self.Yolo.cuda()
 
     def custom_loss(self, y_pred, y_true, true_boxes):
-        
+
         # y_true and y_pred shape (batch, box, 5+nb_class, grid_h, grid_w)
         # true_boxes shape (batch, 1, 1, 1, max_boxes_per_image, 4)
         # print(y_true.shape, y_pred.shape, true_boxes.shape)
@@ -169,8 +168,14 @@ class YOLO(object):
         nb_conf_box  = torch.sum(torch.gt(conf_mask, 0.0).float())
         nb_class_box = torch.sum(torch.gt(class_mask, 0.0).float())
 
-        # wrong print(nb_coord_box, nb_conf_box, nb_class_box)
-        
+        self.batch_index += 1
+        if self.warmup_batches:
+            no_boxes_mask = torch.lt(coord_mask, self.coord_scale/2.).float()
+            if self.batch_index <= self.warmup_batches:
+                true_box_xy = true_box_xy + (0.5 + cell_grid) * no_boxes_mask
+                true_box_wh = true_box_wh + torch.ones_like(true_box_wh) * torch.Tensor(np.reshape(self.anchors, [1,1,1,self.nb_box,2])) * no_boxes_mask
+                coord_mask = torch.ones_like(coord_mask)
+
         loss_xy    = torch.sum((true_box_xy-pred_box_xy)**2     * coord_mask) / (nb_coord_box + 1e-6) / 2.
         loss_wh    = torch.sum((true_box_wh-pred_box_wh)**2     * coord_mask) / (nb_coord_box + 1e-6) / 2.
         loss_conf  = torch.sum((true_box_conf-pred_box_conf)**2 * conf_mask)  / (nb_conf_box  + 1e-6) / 2.
@@ -206,16 +211,19 @@ class YOLO(object):
     
     def train(self, train_imgs,     # the list of images to train the model
                     valid_imgs,     # the list of images used to validate the model after each epoch
-                    test_imgs,      # the list of images used to test the model at the end of training 
-                    nb_epochs,      # number of epoches
+                    test_imgs,      # the list of images used to test the model at the end of training
+                    pretrained_weights,
+                    nb_epochs,
                     learning_rate,
                     batch_size,
                     object_scale,
                     no_object_scale,
                     coord_scale,
                     class_scale,
-                    saved_weights_name='yolo_weights.pth',
-                    debug=False):  
+                    saved_weights_name,
+                    warmup_batches,
+                    train_last,
+                    debug):
 
         self.batch_size = batch_size
         self.object_scale    = object_scale
@@ -223,11 +231,21 @@ class YOLO(object):
         self.coord_scale     = coord_scale
         self.class_scale     = class_scale
         self.debug = debug
+        self.batch_index = 0
+        self.warmup_batches = warmup_batches
+        self.train_last = train_last
+
+        if pretrained_weights:
+            self.load_weights(pretrained_weights)
+            print('pretrained weights loaded from ' + pretrained_weights)
+
+        if self.train_last:
+            for param in self.Yolo.feature_extractor.parameters():
+                param.requires_grad = False
 
         ############################################
         # Make train and validation generators
         ############################################
-
         generator_config = {
             'IMAGE_H'         : self.input_size,
             'IMAGE_W'         : self.input_size,
@@ -243,8 +261,8 @@ class YOLO(object):
 
         train_dataloader = data_generator(train_imgs, generator_config, norm=self.Yolo.normalize)
         valid_dataloader = data_generator(valid_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
-        train_batch_generator = DataLoader(train_dataloader, drop_last=True, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
-        valid_batch_generator = DataLoader(valid_dataloader, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
+        train_batch_generator = DataLoader(train_dataloader, num_workers=8, drop_last=True, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
+        valid_batch_generator = DataLoader(valid_dataloader, num_workers=8, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
 
         ############################################
         # Start the training process
@@ -276,7 +294,7 @@ class YOLO(object):
                           criterion):
         model.train(True)
         for x_batch, b_batch, y_batch in dataloader:
-            x_batch, b_batch, y_batch = x_batch.cuda().float(), b_batch.cuda().float(), y_batch.cuda().float()
+            x_batch, b_batch, y_batch = x_batch.float().cuda(), b_batch.float().cuda(), y_batch.float().cuda()
             model.zero_grad()
             y_batch_pred = model(x_batch)
             loss = criterion(y_batch_pred, y_batch, b_batch)
@@ -301,6 +319,10 @@ class YOLO(object):
                  obj_threshold=0.4,
                  nms_threshold=0.3):
 
+        print('evaulating the model with iou_threshold={}, obj_threshold={}, nms_threshold={}'.format(iou_threshold, obj_threshold, nms_threshold))
+
+        self.Yolo.train(False)
+
         generator_config = {
             'IMAGE_H'         : self.input_size,
             'IMAGE_W'         : self.input_size,
@@ -320,7 +342,7 @@ class YOLO(object):
         all_detections = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
         all_annotations = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
 
-        for i in range(len(generator)):
+        for i in tqdm(range(len(generator))):
             raw_image = generator.load_image(i)
             raw_height, raw_width, raw_channels = raw_image.shape
 

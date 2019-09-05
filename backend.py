@@ -7,7 +7,6 @@ class Yolo_v2(nn.Module):
 
     def __init__(self, nb_box, nb_class, feature_extractor):
         entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
-        print(entrypoints)
 
         super(Yolo_v2, self).__init__()
         self.nb_box = nb_box
@@ -25,7 +24,7 @@ class Yolo_v2(nn.Module):
             self.detect_layer = nn.Conv2d(2048, self.nb_box * (4 + 1 + self.nb_class),
                                           kernel_size=(1, 1), stride=(1, 1), padding=0)
         else:
-            raise Exception('Architecture not supported! Only support MobileNet at the moment!')
+            raise Exception('Architecture not supported! Only support MobileNet and ResNet at the moment!')
 
         new_kernel = np.random.normal(size=self.detect_layer.weight.data.shape) / (13 * 13)
         new_bias = np.random.normal(size=self.detect_layer.bias.data.shape) / (13 * 13)

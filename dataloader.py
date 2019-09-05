@@ -9,17 +9,11 @@ import copy
 import imgaug as ia
 from imgaug import augmenters as iaa
 from util import bbox_iou, BoundBox
+from time import time
 
 
 class BestAnchorBoxFinder(object):
     def __init__(self, ANCHORS):
-        '''
-        ANCHORS: a np.array of even number length e.g.
-        
-        _ANCHORS = [4,2, ##  width=4, height=2,  flat large anchor box
-                    2,4, ##  width=2, height=4,  tall large anchor box
-                    1,1] ##  width=1, height=1,  small anchor box
-        '''
         self.anchors = [BoundBox(0, 0, ANCHORS[2*i], ANCHORS[2*i+1]) 
                         for i in range(int(len(ANCHORS)//2))]
         
@@ -117,7 +111,8 @@ class data_generator(Dataset):
     def aug_image(self, train_instance, jitter):
         image_name = train_instance['filename']
         image = cv2.imread(image_name)
-        
+        #image = np.ones((400, 430, 3)).astype(np.uint8)
+
         if image is None: print('Cannot find ', image_name)
 
         h, w, c = image.shape
@@ -141,7 +136,7 @@ class data_generator(Dataset):
             if flip > 0.5: image = cv2.flip(image, 1)
             
             ### change brightness, sharpness, blurness, dropout and so on .. pixel value augmentation 
-            image = self.aug_pipe.augment_image(image)            
+            image = self.aug_pipe.augment_image(image)
             
         # resize the image to standard size
         image = cv2.resize(image, (self.config['IMAGE_H'], self.config['IMAGE_W']))
@@ -170,7 +165,6 @@ class data_generator(Dataset):
 
     def __getitem__(self, idx):
 
-        x_batch = np.zeros((3, self.config['IMAGE_H'], self.config['IMAGE_W']))                      
         b_batch = np.zeros((1, 1, 1, self.config['TRUE_BOX_BUFFER'], 4))  
         y_batch = np.zeros((self.config['BOX'], 4+1+len(self.config['LABELS']), self.config['GRID_H'], self.config['GRID_W']))     
 

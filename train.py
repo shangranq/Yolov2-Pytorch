@@ -79,30 +79,49 @@ def _main_(args):
     ###############################
     #   Construct the model 
     ###############################
-
     yolo = YOLO(feature_extractor   = config['model']['backend'],
                 input_size          = config['model']['input_size'], 
                 labels              = config['model']['labels'], 
                 max_box_per_image   = config['model']['max_box_per_image'],
-                anchors             = config['model']['anchors']) 
+                anchors             = config['model']['anchors'])
 
-    ###############################
-    #   Start the training process 
-    ###############################
+    ##############################################################
+    #   Start training the last layer with warm up and from scratch
+    ##############################################################
+    # yolo.train(train_imgs         = train_imgs,
+    #            valid_imgs         = valid_imgs,
+    #            test_imgs          = test_imgs,
+    #            pretrained_weights = '',
+    #            nb_epochs          = config['train']['nb_epochs'],
+    #            learning_rate      = config['train']['learning_rate'],
+    #            batch_size         = config['train']['batch_size'],
+    #            object_scale       = config['train']['object_scale'],
+    #            no_object_scale    = config['train']['no_object_scale'],
+    #            coord_scale        = config['train']['coord_scale'],
+    #            class_scale        = config['train']['class_scale'],
+    #            saved_weights_name = config['train']['saved_weights_name_last'],
+    #            warmup_batches     = config['train']['warmup_batches'],
+    #            train_last         = config['train']['train_last'],
+    #            debug              = config['train']['debug'])
 
-    yolo.train(train_imgs         = train_imgs,
-               valid_imgs         = valid_imgs,
-               test_imgs          = test_imgs,
-               nb_epochs          = config['train']['nb_epochs'],
-               learning_rate      = config['train']['learning_rate'], 
-               batch_size         = config['train']['batch_size'],
-               object_scale       = config['train']['object_scale'],
-               no_object_scale    = config['train']['no_object_scale'],
-               coord_scale        = config['train']['coord_scale'],
-               class_scale        = config['train']['class_scale'],
-               saved_weights_name = config['train']['saved_weights_name'],
-               debug              = config['train']['debug'])
-
+    ##############################################################
+    #   Start the training process with the pretrained last layer
+    ##############################################################
+    yolo.train(train_imgs          = train_imgs,
+               valid_imgs          = valid_imgs,
+               test_imgs           = test_imgs,
+               pretrained_weights  = config['train']['saved_weights_name_last'],
+               nb_epochs           = config['train']['nb_epochs'],
+               learning_rate       = config['train']['learning_rate'],
+               batch_size          = config['train']['batch_size'],
+               object_scale        = config['train']['object_scale'],
+               no_object_scale     = config['train']['no_object_scale'],
+               coord_scale         = config['train']['coord_scale'],
+               class_scale         = config['train']['class_scale'],
+               saved_weights_name  = config['train']['saved_weights_name'],
+               warmup_batches=0,
+               train_last=False,
+               debug=False)
 
 
 if __name__ == '__main__':

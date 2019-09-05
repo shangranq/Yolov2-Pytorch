@@ -32,12 +32,12 @@ def _main_(args):
                 input_size          = config['model']['input_size'], 
                 labels              = config['model']['labels'],
                 max_box_per_image   = config['model']['max_box_per_image'],
-                anchors             = config['model']['anchors']) 
+                anchors             = config['model']['anchors'])
 
     yolo.load_weights(config['train']['saved_weights_name'])
     print('weights loaded from {}'.format(config['train']['saved_weights_name']))
 
-    yolo.evaluate(test_imgs, iou_threshold=0.3, obj_threshold=0.3, nms_threshold=0.3)
+    yolo.evaluate(test_imgs, iou_threshold=0.3, obj_threshold=0.4, nms_threshold=0.2)
 
 
 if __name__ == '__main__':
