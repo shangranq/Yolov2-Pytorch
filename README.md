@@ -140,6 +140,30 @@ Here are some samples of predictions for Yolo with Resnet50 backend.
 <img src="sample/image_pred_box/test_pred_25.png" width="225"/> <img src="sample/image_pred_box/test_pred_31.png" width="625"/>
 <img src="sample/image_pred_box/test_pred_36.png" width="325"/><img src="sample/image_pred_box/test_pred_8.png" width="525"/>
 
+# Appendix
+| Variable name       | shape     | meaning    |
+| :------------- | :---------- | :----------- |
+|  cell_grid |  (batch_size, grid_h, grid_w, nb_box, 2) | cell_grid[:, i, j, :, :] = [j, i] the upper_left corner locations                                                             of all cells in the grid scale where each cell has length 1    |
+| y_pred     | (batch_size, grid_h, grid_w, nb_box, 85) | output from the model with 85 channels, the first 4 channels are x,                                                           y, w, h, the 5th channel is the object confidence, the last 80                                                                 channels are 80 probabilities for all categories      |
+| y_true     | (batch_size, grid_h, grid_w, nb_box, 85) | ground truth tensor from data loader |
+| true_boxes      | (batch_size, 1, 1, 1, max_num_boxes, 4) | buffer of all ground truth boxes x, y, w, h  |
+| pred_box_xy     | (batch_size, grid_h, grid_w, nb_box, 2) | predicted x and y locations of the center of the bounding boxes                                                                                                       |
+| pred_box_wh     | (batch_size, grid_h, grid_w, nb_box, 2) | predicted widths and heights of the bounding boxes  |
+| pred_box_conf   | (batch_size, grid_h, grid_w, nb_box) | predicted object confidence of the bounding boxes range from 0 to 1                                                                                                          |
+| pred_box_class  | (batch_size, grid_h, grid_w, nb_box, 80) | predicted class probabilities of the bounding boxes |
+| true_box_xy     | (batch_size, grid_h, grid_w, nb_box, 2) | true x and y locations of the center of the bounding boxes |
+| true_box_wh     | (batch_size, grid_h, grid_w, nb_box, 2) | true widths and heights of the bounding boxes |
+| true_box_conf   | (batch_size, grid_h, grid_w, nb_box)    | take 0 is there is no objects in the cell otherwise take IOU                                                                   between predicted and ground boxes |
+| true_box_class  | (batch_size, grid_h, grid_w, nb_box)    | take value from 0 to 79 to represent the category |
+| coord_mask      | (batch_size, grid_h, grid_w, nb_box, 1) | take 0 if no objects otherwise take self.coord_scale value |
+| conf_mask       | (batch_size, grid_h, grid_w, nb_box, 1) | elements take 3 possible values; take self.object_scale if there                                                               are objects in the cell; take self.no_object_scale if there is                                                                 no objects in the cell and the ground truth boxes are far                                                                     enough; take 0 if there is no objects in the cell but there are                                                               objects in the neighboring. |
+| class_mask      | (batch_size, grid_h, grid_w, nb_box, 1) | take 0 if no objects otherwise take self.class_scale value |
+| best_iou        | (batch_size, grid_h, grid_w, nb_box)    | highest IOU among all IOUs between this cell's predicted box                                                                   with all gt boxes in the image|
+| nb_coord_box    | (batch_size)                           | number of objects |
+| nb_class_box    | (batch_size)                           | number of objects |
+| nb_conf_box     | (batch_size)                           | number of objects plus number of on_objects cells where the                                                                    conf_mask takes self.no_object_scale value |
+
+
 
 
 
