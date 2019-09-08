@@ -163,7 +163,8 @@ class YOLO(object):
         ### class mask: simply the position of the ground truth boxes (the predictors)
         # class_mask = y_true[..., 4] * tf.gather(self.class_wt, true_box_class) * self.class_scale
         # need to figure out what is tf.gather 
-        class_mask = y_true[..., 4] * true_box_class.float() * self.class_scale # this is a bug!
+        # class_mask = y_true[..., 4] * true_box_class.float() * self.class_scale # this is a bug!
+        class_mask = y_true[..., 4] * self.class_scale
  
         nb_coord_box = torch.sum(torch.gt(coord_mask, 0.0).float())
         nb_conf_box  = torch.sum(torch.gt(conf_mask, 0.0).float())
