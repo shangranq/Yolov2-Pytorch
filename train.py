@@ -54,6 +54,7 @@ def _main_(args):
         np.random.shuffle(train_imgs)
         valid_imgs = train_imgs[train_valid_split:]
         train_imgs = train_imgs[:train_valid_split]
+        print('{} train images and {} validation images'.format(len(train_imgs), len(valid_imgs)))
 
     # parse annotations of the testing set
     test_imgs, test_labels = parse_annotation(config['test']['test_annot_folder'],
@@ -101,7 +102,8 @@ def _main_(args):
                coord_scale        = config['train']['coord_scale'],
                class_scale        = config['train']['class_scale'],
                saved_weights_name = config['train']['saved_weights_name'],
-               debug              = config['train']['debug'])
+               train_last         = True,
+               debug              = True)
 
 
 

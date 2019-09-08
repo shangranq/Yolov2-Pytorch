@@ -7,7 +7,6 @@ class Yolo_v2(nn.Module):
 
     def __init__(self, nb_box, nb_class, feature_extractor):
         entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
-        print(entrypoints)
 
         super(Yolo_v2, self).__init__()
         self.nb_box = nb_box

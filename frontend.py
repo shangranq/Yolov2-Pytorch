@@ -163,7 +163,7 @@ class YOLO(object):
         ### class mask: simply the position of the ground truth boxes (the predictors)
         # class_mask = y_true[..., 4] * tf.gather(self.class_wt, true_box_class) * self.class_scale
         # need to figure out what is tf.gather 
-        class_mask = y_true[..., 4] * true_box_class.float() * self.class_scale      
+        class_mask = y_true[..., 4] * true_box_class.float() * self.class_scale # this is a bug!
  
         nb_coord_box = torch.sum(torch.gt(coord_mask, 0.0).float())
         nb_conf_box  = torch.sum(torch.gt(conf_mask, 0.0).float())
@@ -187,17 +187,20 @@ class YOLO(object):
         """
         Debugging code
         """
-        if self.debug:
+        self.batch_index += 1
 
+        if self.debug and self.batch_index % 1500 == 0:
             nb_true_box = torch.sum(y_true[..., 4])
             nb_pred_box = torch.sum(torch.gt(true_box_conf, 0.5).float() * torch.gt(pred_box_conf, 0.3).float())
             current_recall = nb_pred_box.data / (nb_true_box.data + 1e-6)
+            print('batch index ', self.batch_index, '/ epoch index ', self.epoch_index)
             print('loss_xy: ', loss_xy)
             print('loss_wh: ', loss_wh)
             print('loss_conf: ', loss_conf)
             print('loss_class: ', loss_class)
+            print('loss: ', loss)
             print('current_recall: ', current_recall)
-            print('*'*80)
+            print('*' * 80)
 
         return loss
     
@@ -214,8 +217,9 @@ class YOLO(object):
                     no_object_scale,
                     coord_scale,
                     class_scale,
-                    saved_weights_name='yolo_weights.pth',
-                    debug=False):  
+                    saved_weights_name,
+                    train_last,
+                    debug):
 
         self.batch_size = batch_size
         self.object_scale    = object_scale
@@ -223,6 +227,20 @@ class YOLO(object):
         self.coord_scale     = coord_scale
         self.class_scale     = class_scale
         self.debug = debug
+        self.train_last = train_last
+        self.batch_index = 0
+        self.epoch_index = 0
+
+        if self.train_last:
+            for param in self.Yolo.feature_extractor.parameters():
+                param.requires_grad = False
+            optimizer = optim.Adam(self.Yolo.detect_layer.parameters(), lr=learning_rate, betas=[0.9, 0.999], eps=1e-08,
+                                   weight_decay=0.0)
+        else:
+            for param in self.Yolo.feature_extractor.parameters():
+                param.requires_grad = True
+            optimizer = optim.Adam(self.Yolo.parameters(), lr=learning_rate, betas=[0.9, 0.999], eps=1e-08,
+                                   weight_decay=0.0)
 
         ############################################
         # Make train and validation generators
@@ -243,16 +261,21 @@ class YOLO(object):
 
         train_dataloader = data_generator(train_imgs, generator_config, norm=self.Yolo.normalize)
         valid_dataloader = data_generator(valid_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
-        train_batch_generator = DataLoader(train_dataloader, drop_last=True, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
-        valid_batch_generator = DataLoader(valid_dataloader, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
+        train_batch_generator = DataLoader(train_dataloader, num_workers=8, drop_last=True, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
+        valid_batch_generator = DataLoader(valid_dataloader, num_workers=8, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
 
         ############################################
         # Start the training process
         ############################################
-        optimizer = optim.Adam(self.Yolo.parameters(), lr=learning_rate, betas=[0.9, 0.999], eps=1e-08, weight_decay=0.0)
-        
         val_best_loss = float('inf')
-        
+
+        print('validating the model ...')
+        val_loss = self.val_epoch(self.Yolo, valid_batch_generator, self.custom_loss)
+        print('validation loss is', val_loss)
+        self.evaluate(valid_imgs[:1000])
+        self.batch_index = 0
+        self.epoch_index = 0
+
         for epoch in range(nb_epochs):
             print('*'*40)
             print('training the {} th epoch ...'.format(epoch))
@@ -260,9 +283,13 @@ class YOLO(object):
             print('validating the model ...')
             val_loss = self.val_epoch(self.Yolo, valid_batch_generator, self.custom_loss)
             print('validation loss is', val_loss)
+            self.evaluate(valid_imgs[:1000])
+
             if val_loss < val_best_loss:
                 val_best_loss = val_loss
                 torch.save(self.Yolo.state_dict(), saved_weights_name)
+            self.epoch_index += 1
+            self.batch_index = 0
                                 
         ############################################
         # Compute mAP on the validation set
@@ -298,8 +325,10 @@ class YOLO(object):
     def evaluate(self, 
                  test_imgs, 
                  iou_threshold=0.3,
-                 obj_threshold=0.4,
+                 obj_threshold=0.2,
                  nms_threshold=0.3):
+
+        self.Yolo.train(False)
 
         generator_config = {
             'IMAGE_H'         : self.input_size,
@@ -313,6 +342,8 @@ class YOLO(object):
             'BATCH_SIZE'      : 1,
             'TRUE_BOX_BUFFER' : self.max_box_per_image,
         }
+
+        # evaluation has to be in the eval stage
   
         generator = data_generator(test_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
 
@@ -332,7 +363,7 @@ class YOLO(object):
                 cv2.imwrite('./sample/image_pred_box/test_pred_{}.png'.format(i), image_bbox)
 
             score = np.array([box.score for box in pred_boxes])
-            pred_labels = np.array([box.label for box in pred_boxes])        
+            pred_labels = np.array([box.label for box in pred_boxes])
             
             if len(pred_boxes) > 0:
                 pred_boxes = np.array([[box.xmin*raw_width, box.ymin*raw_height, box.xmax*raw_width, box.ymax*raw_height, box.score] for box in pred_boxes])
@@ -343,7 +374,7 @@ class YOLO(object):
             score_sort = np.argsort(-score)
             pred_labels = pred_labels[score_sort]
             pred_boxes  = pred_boxes[score_sort]
-            
+
             # copy detections to all_detections
             for label in range(generator.num_classes()):
                 all_detections[i][label] = pred_boxes[pred_labels == label, :]
@@ -411,8 +442,8 @@ class YOLO(object):
             average_precision  = compute_ap(recall, precision)  
             average_precisions[label] = average_precision
 
-        for label, average_precision in average_precisions.items():
-            print(self.labels[label], '{:.4f}'.format(average_precision))
+        # for label, average_precision in average_precisions.items():
+        #     print(self.labels[label], '{:.4f}'.format(average_precision))
         print('mAP: {:.4f}'.format(sum(average_precisions.values()) / len(average_precisions)))
 
         return average_precisions
