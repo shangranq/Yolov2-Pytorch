@@ -116,14 +116,14 @@ To evaluate the model performance on testing set, run
 ```
 python test.py -c config.json
 ```
-mAP will be printed for each class and for all classes, this implementation's overall mAP is 0.1896. 
+mAP will be printed for each class and for all classes, this implementation's overall mAP is 0.2479. 
 
 Currently, I am systematically performing experiments with various backends and will fill out the table below. 
 
 | Backend       | mAP (IOU=0.3)     | mAP (IOU=0.5)    |
 | :------------- | :----------: | -----------: |
 |  MobileNet | NA               | NA      |
-| ResNet     | NA               | NA      |
+| ResNet     | 25              | NA      |
 | Full Yolo  | NA               | NA      |
 
 
