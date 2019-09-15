@@ -32,9 +32,13 @@ class Yolo_v2(nn.Module):
         self.detect_layer.bias.data = torch.Tensor(new_bias)
 
     def forward(self, x):
+        self.check_nan(x, 'input')
         x = self.feature_extractor(x)
+        self.check_nan(x, 'res_feature')
         x = self.detect_layer(x)
+        self.check_nan(x, 'output')
         x = x.view(-1, self.nb_box, (4 + 1 + self.nb_class), 13, 13)
+        self.check_nan(x, 'final output')
         return x
 
     def normalize(self, image):
@@ -45,15 +49,36 @@ class Yolo_v2(nn.Module):
         image[:, :, 2] = image[:, :, 2] * 0.225 + 0.406
         return image
 
+    def check_nan(self, x, name):
+        if (x != x).any():
+            raise ValueError('NAN. in {}'.format(name))
+
 
 if __name__ == "__main__":
     Yolo = Yolo_v2(5, 80, "ResNet")
     test_input = torch.Tensor(1, 3, 416, 416)
-    output = Yolo(test_input)
-    # print(output.shape)
-    # for p in Yolo.parameters():
-    #     print(p.requires_grad, p.data.shape)
+    for name, param in Yolo.named_parameters():
+        if 'bn' in name:
+            param.requires_grad = False
+        print(name, param.requires_grad)
 
+
+
+    # for param in Yolo.feature_extractor.parameters():
+    #     param.requires_grad = True
+    # for name, child in Yolo.named_children():
+    #     for name_2, params in child.named_parameters():
+    #         print(name_2, params.requires_grad)
+    # for param in Yolo.parameters():
+    #     print(param.shape)
+
+    # for param in Yolo.feature_extractor.parameters():
+    #     param.requires_grad = False
+    # for name, child in Yolo.named_children():
+    #     for name_2, params in child.named_parameters():
+    #         print(name_2, params.requires_grad)
+    # for param in Yolo.detect_layer.parameters():
+    #     print(param.shape)
 
 
 

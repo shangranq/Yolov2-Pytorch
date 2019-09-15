@@ -37,7 +37,7 @@ def _main_(args):
     yolo.load_weights(config['train']['saved_weights_name'])
     print('weights loaded from {}'.format(config['train']['saved_weights_name']))
 
-    yolo.evaluate(test_imgs, iou_threshold=0.3, obj_threshold=0.4, nms_threshold=0.2)
+    yolo.evaluate(test_imgs[:500], iou_threshold=0.3, obj_threshold=0.2, nms_threshold=0.2)
 
 
 if __name__ == '__main__':

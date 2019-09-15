@@ -32,7 +32,12 @@ class YOLO(object):
         self.Yolo = Yolo_v2(nb_box=self.nb_box, nb_class=self.nb_class, feature_extractor=feature_extractor)
         self.Yolo = self.Yolo.cuda()
 
+
     def custom_loss(self, y_pred, y_true, true_boxes):
+
+        self.check_nan(y_pred, 'y_pred')
+        self.check_nan(y_true, 'y_true')
+        self.check_nan(true_boxes, 'true_boxes')
 
         # y_true and y_pred shape (batch, box, 5+nb_class, grid_h, grid_w)
         # true_boxes shape (batch, 1, 1, 1, max_boxes_per_image, 4)
@@ -66,11 +71,19 @@ class YOLO(object):
         ### adjust w and h
         # predicted bounding box height = anchor_box_h * exp(y_pred_h) 
         # predicted bounding box width = anchor_box_w * exp(y_pred_w)
-        pred_box_wh = torch.exp(y_pred[..., 2:4]) * torch.from_numpy(np.reshape(self.anchors, [1,1,1,self.nb_box,2])).cuda().float()
+        """
+        be careful at here torch.exp is not stable; switch to power implementation 
+        """
+        #pred_box_wh = torch.exp(y_pred[..., 2:4]) * torch.from_numpy(np.reshape(self.anchors, [1,1,1,self.nb_box,2])).cuda().float()
+        pred_box_wh = ((torch.sigmoid(y_pred[..., 2:4]) * 2) ** 3) * torch.from_numpy(np.reshape(self.anchors, [1,1,1,self.nb_box,2])).cuda().float()
+
+        self.check_nan(pred_box_wh, 'pred_box_wh')
 
         ### adjust confidence
         # confidence ranges from 0 to 1
         pred_box_conf = torch.sigmoid(y_pred[..., 4])
+
+        self.check_nan(pred_box_conf, 'pred_box_conf')
         
         ### adjust class probabilities
         pred_box_class = y_pred[..., 5:]
@@ -105,6 +118,9 @@ class YOLO(object):
 
         union_areas = pred_areas + true_areas - intersect_areas   
         iou_scores  = torch.div(intersect_areas, union_areas)           # shape (batch, grid_h, grid_w, box, 1)
+
+        self.check_nan(iou_scores, 'iou_scores')
+
         # the iou_scores calculated all IOU between predicted boxes and true boxes that were assigned to that cell
         
         # y_true[..., 4] is a mask whose value is either 0 (no objects in the cell) or 1 (object in the cell)
@@ -112,6 +128,8 @@ class YOLO(object):
         
         ### adjust class probabilities
         _, true_box_class = torch.max(y_true[..., 5:], -1)
+
+        self.check_nan(true_box_class, 'true_box_class')
 
         """
         Determine the masks
@@ -152,16 +170,21 @@ class YOLO(object):
         union_areas = pred_areas + true_areas - intersect_areas
         iou_scores  = torch.div(intersect_areas, union_areas)
 
+        self.check_nan(iou_scores, 'iou_scores')
+
         best_ious, _ = torch.max(iou_scores, dim=4)
         # best_ious shape (batch, grid_h, grid_w, nb_box)
         conf_mask = torch.lt(best_ious, 0.6).float() * torch.eq(y_true[..., 4], 0).float() * self.no_object_scale
         
         # penalize the confidence of the boxes, which are reponsible for corresponding ground truth box
         conf_mask = conf_mask + y_true[..., 4] * self.object_scale
+
+        self.check_nan(conf_mask, 'conf_mask')
         
         ### class mask: simply the position of the ground truth boxes (the predictors)
         # class_mask = y_true[..., 4] * tf.gather(self.class_wt, true_box_class) * self.class_scale
         # need to figure out what is tf.gather 
+        # class_mask = y_true[..., 4] * true_box_class.float() * self.class_scale # this is a bug!
         class_mask = y_true[..., 4] * self.class_scale
  
         nb_coord_box = torch.sum(torch.gt(coord_mask, 0.0).float())
@@ -177,8 +200,17 @@ class YOLO(object):
                 coord_mask = torch.ones_like(coord_mask)
 
         loss_xy    = torch.sum((true_box_xy-pred_box_xy)**2     * coord_mask) / (nb_coord_box + 1e-6) / 2.
+
+        self.check_nan(loss_xy, 'loss_xy')
+
         loss_wh    = torch.sum((true_box_wh-pred_box_wh)**2     * coord_mask) / (nb_coord_box + 1e-6) / 2.
+
+        self.check_nan(loss_wh, 'loss_wh')
+
         loss_conf  = torch.sum((true_box_conf-pred_box_conf)**2 * conf_mask)  / (nb_conf_box  + 1e-6) / 2.
+
+        self.check_nan(loss_conf, 'loss_conf')
+
         # loss_class = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=true_box_class, logits=pred_box_class)
         # loss_class = tf.reduce_sum(loss_class * class_mask) / (nb_class_box + 1e-6)
         # pred_box_class swap axes 16, 13, 13, 5, 80 into 16, 80, 13, 13, 5
@@ -187,34 +219,53 @@ class YOLO(object):
         loss_class = nn.CrossEntropyLoss(reduction='none')(pred_box_class, true_box_class)     
         loss_class = (loss_class * class_mask).sum() / (nb_class_box + 1e-6)
 
+        self.check_nan(loss_class, 'loss_class')
+
         loss = loss_xy + loss_wh + loss_conf + loss_class
+
+        if loss != loss:
+            print('NANANANANANA')
+            print('loss_xy: ', loss_xy)
+            print('loss_wh: ', loss_wh)
+            print('loss_conf: ', loss_conf)
+            print('loss_class: ', loss_class)
+            raise ValueError('NAN.')
 
         """
         Debugging code
         """
-        if self.debug and self.batch_index % 100 == 0:
+        self.batch_index += 1
+
+        if self.debug and self.batch_index % 1500 == 0:
 
             nb_true_box = torch.sum(y_true[..., 4])
             nb_pred_box = torch.sum(torch.gt(true_box_conf, 0.5).float() * torch.gt(pred_box_conf, 0.3).float())
             current_recall = nb_pred_box.data / (nb_true_box.data + 1e-6)
             print('batch index ', self.batch_index, '/ epoch index ', self.epoch_index)
+            print('stat xy', torch.std_mean(y_pred[..., :2]))
+            print('stat wh', torch.std_mean(y_pred[..., 2:4]))
+            print('stat conf', torch.std_mean(y_pred[..., 4]))
+            print('stat class', torch.std_mean(y_pred[..., 5:]))
             print('loss_xy: ', loss_xy)
             print('loss_wh: ', loss_wh)
             print('loss_conf: ', loss_conf)
             print('loss_class: ', loss_class)
             print('loss: ', loss)
             print('current_recall: ', current_recall)
-            print('*'*80)
+            print('*' * 80)
 
         return loss
+
+    def check_nan(self, x, name):
+        if (x != x).any():
+            raise ValueError('NAN. in {}'.format(name))
     
     def load_weights(self, weight_path):
         self.Yolo.load_state_dict(torch.load(weight_path))     
     
-    def train(self, train_imgs,     # the list of images to train the model
-                    valid_imgs,     # the list of images used to validate the model after each epoch
-                    test_imgs,      # the list of images used to test the model at the end of training
-                    pretrained_weights,
+    def train(self, train_imgs,
+                    valid_imgs,
+                    test_imgs,
                     nb_epochs,
                     learning_rate,
                     batch_size,
@@ -223,31 +274,22 @@ class YOLO(object):
                     coord_scale,
                     class_scale,
                     saved_weights_name,
-                    warmup_batches,
-                    train_last,
+                    train_last_epoch,
+                    freeze_BN,
+                    train_mode,
                     debug):
 
-        self.batch_size = batch_size
-        self.object_scale    = object_scale
-        self.no_object_scale = no_object_scale
-        self.coord_scale     = coord_scale
-        self.class_scale     = class_scale
-        self.debug = debug
-        self.batch_index = 0
-        self.epoch_index = 0
-        self.warmup_batches = warmup_batches
-        self.train_last = train_last
-
-        if pretrained_weights:
-            self.load_weights(pretrained_weights)
-            print('pretrained weights loaded from ' + pretrained_weights)
-
-        if self.train_last:
-            for param in self.Yolo.feature_extractor.parameters():
-                param.requires_grad = False
-        else:
-            for param in self.Yolo.feature_extractor.parameters():
-                param.requires_grad = True
+        self.batch_size       = batch_size
+        self.object_scale     = object_scale
+        self.no_object_scale  = no_object_scale
+        self.coord_scale      = coord_scale
+        self.class_scale      = class_scale
+        self.debug            = debug
+        self.train_last_epoch = train_last_epoch
+        self.freeze_BN        = freeze_BN
+        self.train_mode       = train_mode
+        self.batch_index      = 0
+        self.epoch_index      = 0
 
         ############################################
         # Make train and validation generators
@@ -266,32 +308,73 @@ class YOLO(object):
         }
 
         train_dataloader = data_generator(train_imgs, generator_config, norm=self.Yolo.normalize)
-        valid_dataloader = data_generator(valid_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
         train_batch_generator = DataLoader(train_dataloader, num_workers=8, drop_last=True, shuffle=True, batch_size=generator_config['BATCH_SIZE'])
-        valid_batch_generator = DataLoader(valid_dataloader, num_workers=8, drop_last=True, shuffle=False, batch_size=generator_config['BATCH_SIZE'])
+
+        self.evaluate(valid_imgs[:1000])
 
         ############################################
-        # Start the training process
+        # firstly train the last detection layer if self.epoch_index < self.train_last_epoch
         ############################################
-        optimizer = optim.Adam(self.Yolo.parameters(), lr=learning_rate, betas=[0.9, 0.999], eps=1e-08, weight_decay=0.0)
-        
-        val_best_loss = float('inf')
-        
-        for epoch in range(nb_epochs):
-            print('*'*40)
-            print('training the {} th epoch ...'.format(epoch))
-            self.train_epoch(self.Yolo, train_batch_generator, optimizer, self.custom_loss)
+        print('stage 1 will train the last layer with the following parameters ... ')
+        for param in self.Yolo.feature_extractor.parameters():
+            param.requires_grad = False
+        for name, param in self.Yolo.named_parameters():
+            if param.requires_grad:
+                print('\t' + name)
+
+        optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.Yolo.parameters()), lr=learning_rate,
+                                   betas=[0.9, 0.999], eps=1e-08, weight_decay=0.0)
+
+        best_mAP = 0
+
+        for epoch in range(self.train_last_epoch):
+            print('*' * 40)
+            print('training the last layer at the {} th epoch ...'.format(epoch))
+            self.train_epoch(self.Yolo, train_batch_generator, optimizer, self.custom_loss, train_mode=self.train_mode)
             print('validating the model ...')
-            val_loss = self.val_epoch(self.Yolo, valid_batch_generator, self.custom_loss)
-            print('validation loss is', val_loss)
-            if val_loss < val_best_loss:
-                val_best_loss = val_loss
+            AP = self.evaluate(valid_imgs[:2000])
+            mAP = sum(AP.values()) / len(AP)
+
+            if mAP < best_mAP:
+                best_mAP = mAP
                 torch.save(self.Yolo.state_dict(), saved_weights_name)
+
             self.epoch_index += 1
             self.batch_index = 0
-                                
+
         ############################################
-        # Compute mAP on the validation set
+        # then train the whole model except for BatchNorm
+        ############################################
+        print('stage 2 will train the following parameters ... ')
+        new_params = []
+        for name, param in self.Yolo.feature_extractor.named_parameters():
+            param.requires_grad = True
+            if self.freeze_BN:
+                if 'bn' in name:
+                    param.requires_grad = False
+            if param.requires_grad:
+                print('\t' + name)
+                new_params.append(param)
+
+        optimizer.add_param_group({'params': new_params})
+
+        for epoch in range(self.train_last_epoch, nb_epochs):
+            print('*'*40)
+            print('training the whole model at the {} th epoch ...'.format(epoch))
+            self.train_epoch(self.Yolo, train_batch_generator, optimizer, self.custom_loss, train_mode=self.train_mode)
+            print('validating the model ...')
+            AP = self.evaluate(valid_imgs[:2000])
+            mAP = sum(AP.values()) / len(AP)
+
+            if mAP < best_mAP:
+                best_mAP = mAP
+                torch.save(self.Yolo.state_dict(), saved_weights_name)
+
+            self.epoch_index += 1
+            self.batch_index = 0
+
+        ############################################
+        # Compute mAP on the testing set
         ############################################
         print('evaluating the testing set mAP ... ')
         average_precisions = self.evaluate(test_imgs)
@@ -299,10 +382,13 @@ class YOLO(object):
     def train_epoch(self, model,
                           dataloader,
                           optimizer,
-                          criterion):
-        model.train(True)
+                          criterion,
+                          train_mode):
+
+        model.train(train_mode)
         for x_batch, b_batch, y_batch in dataloader:
-            x_batch, b_batch, y_batch = x_batch.float().cuda(), b_batch.float().cuda(), y_batch.float().cuda()
+            x_batch, b_batch, y_batch = x_batch.cuda().float(), b_batch.cuda().float(), y_batch.cuda().float()
+            self.check_nan(x_batch, 'x_batch')
             model.zero_grad()
             y_batch_pred = model(x_batch)
             loss = criterion(y_batch_pred, y_batch, b_batch)
@@ -312,6 +398,7 @@ class YOLO(object):
     def val_epoch(self, model,
                         dataloader,
                         criterion):
+
         model.train(False)
         loss = 0
         batch_count = 0
@@ -326,11 +413,10 @@ class YOLO(object):
     def evaluate(self, 
                  test_imgs, 
                  iou_threshold=0.3,
-                 obj_threshold=0.4,
+                 obj_threshold=0.2,
                  nms_threshold=0.3):
 
         print('evaulating the model with iou_threshold={}, obj_threshold={}, nms_threshold={}'.format(iou_threshold, obj_threshold, nms_threshold))
-
         self.Yolo.train(False)
 
         generator_config = {
@@ -345,6 +431,8 @@ class YOLO(object):
             'BATCH_SIZE'      : 1,
             'TRUE_BOX_BUFFER' : self.max_box_per_image,
         }
+
+        # evaluation has to be in the eval stage
   
         generator = data_generator(test_imgs, generator_config, norm=self.Yolo.normalize, jitter=False)
 
@@ -364,7 +452,7 @@ class YOLO(object):
                 cv2.imwrite('./sample/image_pred_box/test_pred_{}.png'.format(i), image_bbox)
 
             score = np.array([box.score for box in pred_boxes])
-            pred_labels = np.array([box.label for box in pred_boxes])        
+            pred_labels = np.array([box.label for box in pred_boxes])
             
             if len(pred_boxes) > 0:
                 pred_boxes = np.array([[box.xmin*raw_width, box.ymin*raw_height, box.xmax*raw_width, box.ymax*raw_height, box.score] for box in pred_boxes])
@@ -375,7 +463,7 @@ class YOLO(object):
             score_sort = np.argsort(-score)
             pred_labels = pred_labels[score_sort]
             pred_boxes  = pred_boxes[score_sort]
-            
+
             # copy detections to all_detections
             for label in range(generator.num_classes()):
                 all_detections[i][label] = pred_boxes[pred_labels == label, :]
@@ -443,8 +531,8 @@ class YOLO(object):
             average_precision  = compute_ap(recall, precision)  
             average_precisions[label] = average_precision
 
-        for label, average_precision in average_precisions.items():
-            print(self.labels[label], '{:.4f}'.format(average_precision))
+        # for label, average_precision in average_precisions.items():
+        #     print(self.labels[label], '{:.4f}'.format(average_precision))
         print('mAP: {:.4f}'.format(sum(average_precisions.values()) / len(average_precisions)))
 
         return average_precisions

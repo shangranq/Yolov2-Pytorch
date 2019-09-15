@@ -53,6 +53,7 @@ def _main_(args):
         np.random.shuffle(train_imgs)
         valid_imgs = train_imgs[train_valid_split:]
         train_imgs = train_imgs[:train_valid_split]
+        print('{} train images and {} validation images'.format(len(train_imgs), len(valid_imgs)))
 
     # parse annotations of the testing set
     test_imgs, test_labels = parse_annotation(config['test']['test_annot_folder'],
@@ -98,29 +99,12 @@ def _main_(args):
                no_object_scale    = config['train']['no_object_scale'],
                coord_scale        = config['train']['coord_scale'],
                class_scale        = config['train']['class_scale'],
-               saved_weights_name = config['train']['saved_weights_name_last'],
-               warmup_batches     = config['train']['warmup_batches'],
-               train_last         = True,
+               saved_weights_name = config['train']['saved_weights_name'],
+               train_last_epoch   = 3,
+               freeze_BN          = True,
+               train_mode         = False,
                debug              = True)
 
-    ##############################################################
-    #   train the whole model with the pretrained last layer
-    ##############################################################
-    yolo.train(train_imgs          = train_imgs,
-               valid_imgs          = valid_imgs,
-               test_imgs           = test_imgs,
-               pretrained_weights  = config['train']['saved_weights_name_last'],
-               nb_epochs           = config['train']['nb_epochs'],
-               learning_rate       = config['train']['learning_rate'],
-               batch_size          = config['train']['batch_size'],
-               object_scale        = config['train']['object_scale'],
-               no_object_scale     = config['train']['no_object_scale'],
-               coord_scale         = config['train']['coord_scale'],
-               class_scale         = config['train']['class_scale'],
-               saved_weights_name  = config['train']['saved_weights_name'],
-               warmup_batches      = 0,
-               train_last          = False,
-               debug               = True)
 
 
 if __name__ == '__main__':

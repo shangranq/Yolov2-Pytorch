@@ -16,21 +16,19 @@
     },
 
     "train": {
-        "train_image_folder":     "/data/datasets/COCO/train2014/",
-        "train_annot_folder":     "/data/datasets/COCO/train2014_annotations/",
-        "pretrained_weights":     "",
-        "batch_size":             16,
-        "learning_rate":          1e-4,
-        "nb_epochs":              15,
-        "object_scale":           5.0,
-        "no_object_scale":        1.0,
-        "coord_scale":            1.0,
-        "class_scale":            1.0,
-        "warmup_batches":         0,
-        "saved_weights_name_last":"ResNet_last_COCO.pth",
-        "saved_weights_name":     "ResNet_COCO.pth",
-        "train_last":             true,
-        "debug":                  false
+        "train_image_folder":   "/data/datasets/COCO/train2014/",
+        "train_annot_folder":   "/data/datasets/COCO/train2014_annotations/",     
+          
+        "pretrained_weights":   "",
+        "batch_size":           16,
+        "learning_rate":        1e-4,
+        "nb_epochs":            20,
+        "object_scale":         5.0,
+        "no_object_scale":      1.0,
+        "coord_scale":          1.0,
+        "class_scale":          1.0,
+        "saved_weights_name":   "ResNet_COCO.pth",
+        "debug":                false
     },
 
     "valid": {
