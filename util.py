@@ -5,7 +5,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
-
+from scipy.special import expit, logit
 
 class WeightReader:
     def __init__(self, weight_file):
@@ -146,8 +146,13 @@ def decode_netout(netout, anchors, nb_class, obj_threshold=0.3, nms_threshold=0.
 
                     x = (col + _sigmoid(x)) / grid_w # center position, unit: image width
                     y = (row + _sigmoid(y)) / grid_h # center position, unit: image height
-                    w = anchors[2 * b + 0] * np.exp(w) / grid_w # unit: image width
-                    h = anchors[2 * b + 1] * np.exp(h) / grid_h # unit: image height
+                    # w = anchors[2 * b + 0] * np.exp(w) / grid_w # unit: image width
+                    # h = anchors[2 * b + 1] * np.exp(h) / grid_h # unit: image height
+                    """
+                    stable power
+                    """
+                    w = anchors[2 * b + 0] * pow(w) / grid_w  # unit: image width
+                    h = anchors[2 * b + 1] * pow(h) / grid_h  # unit: image height
                     confidence = netout[row,col,b,4]
                     
                     box = BoundBox(x-w/2, y-h/2, x+w/2, y+h/2, confidence, classes)
@@ -246,8 +251,8 @@ def _interval_overlap(interval_a, interval_b):
 
 
 def _sigmoid(x):
-    return 1. / (1. + np.exp(-x))
-
+    #return 1. / (1. + np.exp(-x))
+    return expit(x)
 
 def _softmax(x, axis=-1, t=-100.):
     x = x - np.max(x)
@@ -256,6 +261,8 @@ def _softmax(x, axis=-1, t=-100.):
     e_x = np.exp(x)
     return e_x / e_x.sum(axis, keepdims=True)
 
+def pow(x):
+    return (_sigmoid(x) * 2) ** 3
 
 def load_image(filename):
     image = cv2.imread(filename)

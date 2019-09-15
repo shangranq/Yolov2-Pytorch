@@ -102,7 +102,9 @@ def _main_(args):
                coord_scale        = config['train']['coord_scale'],
                class_scale        = config['train']['class_scale'],
                saved_weights_name = config['train']['saved_weights_name'],
-               train_last         = True,
+               train_last_epoch   = 3,
+               freeze_BN          = True,
+               train_mode         = False,
                debug              = True)
 
 
